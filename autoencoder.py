@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from torchvision import transforms
 from PIL import Image
 import os
@@ -101,7 +101,7 @@ def test_autoencoder(model, dataloader, criterion, device):
 
 
 # Hyperparameters
-num_epochs = 30
+num_epochs = 40
 batch_size = 32
 learning_rate = 1e-3
 img_height, img_width = 224, 224  # Replace with actual dimensions (dependent on autoencoder architecture)
@@ -112,13 +112,31 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-path = "PNC_FrameCorr_input_224x224x3_imgs/"
+path = "UCF_224x224x3_PNC_FrameCorr_input_imgs/"
 
 dataset = ImageDataset(path, path, transform=transform)
-train_size = int(0.8 * len(dataset))  # 851
-test_size = len(dataset) - train_size  # 1064 - 851 = 213
-print(len(dataset))
-train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
+# train_size = int(0.8 * len(dataset))  # 851
+# test_size = len(dataset) - train_size  # 1064 - 851 = 213
+
+# List of specific image names for the test dataset
+test_img_names = [
+    "diving_7", "diving_8", "golf_front_7", "golf_front_8", "kick_front_8", "kick_front_9",
+    "lifting_5", "lifting_6", "riding_horse_8", "riding_horse_9", "running_7", "running_8",
+    "running_9", "skating_8", "skating_9", "swing_bench_7", "swing_bench_8", "swing_bench_9"
+]
+
+# Create a subset of the dataset for the test dataset
+test_indices = [
+    i for i in range(len(dataset))
+    if "_".join(dataset.img_names[i].split("_")[:-1]) in test_img_names
+]
+train_indices = [i for i in range(len(dataset)) if i not in test_indices]
+test_dataset = Subset(dataset, test_indices)
+train_dataset = Subset(dataset, train_indices)
+
+print(f"Train dataset size: {len(train_dataset)}")
+print(f"Test dataset size: {len(test_dataset)}")
+
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
