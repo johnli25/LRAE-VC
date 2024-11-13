@@ -7,6 +7,7 @@ from PIL import Image
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from collections import defaultdict
 
 # Quick initial autoencoder, assuming input dim is 224x224x3
 class ConvAutoencoder(nn.Module):
@@ -98,10 +99,59 @@ def test_autoencoder(model, dataloader, criterion, device):
 
     return test_loss / len(dataloader.dataset)
 
+def calculate_mse(image1, image2):
+    """Calculate MSE between two image arrays."""
+    return np.mean((image1 - image2) ** 2)
+
+def get_prefix(filename):
+    """Extract prefix from filename, assuming prefix is before the last underscore."""
+    prefix = "_".join(filename.split("_")[:-1])
+    return prefix
+
+def mse_between_folders_grouped(output_folder, input_folder):
+    mse_groups = defaultdict(list)
+    
+    # Iterate over each file in the output folder
+    for filename in os.listdir(output_folder):
+        input_path = os.path.join(input_folder, filename)
+        output_path = os.path.join(output_folder, filename)
+        
+        # Check if a corresponding file exists in the input folder
+        if os.path.isfile(input_path) and os.path.isfile(output_path):
+            # Open and convert images to grayscale
+            img_input = Image.open(input_path).convert('L')
+            img_output = Image.open(output_path).convert('L')
+            
+            # Ensure the images are the same size
+            if img_input.size != img_output.size:
+                print(f"Skipping {filename}: images have different dimensions.")
+                continue
+            
+            # Convert images to numpy arrays
+            img_input = np.array(img_input)
+            img_output = np.array(img_output)
+            
+            # Calculate the MSE
+            mse = calculate_mse(img_input, img_output)
+            
+            # Group by prefix
+            prefix = get_prefix(filename)
+            mse_groups[prefix].append(mse)
+        else:
+            print(f"No corresponding file for {filename} in input folder.")
+    
+    # Calculate the average MSE for each group
+    average_mse_results = {prefix: np.mean(mse_list) for prefix, mse_list in mse_groups.items()}
+    
+    # Print the results
+    for prefix, avg_mse in average_mse_results.items():
+        print(f"Average MSE for {prefix}: {avg_mse}")
+    
+    return average_mse_results
 
 
 # Hyperparameters
-num_epochs = 40
+num_epochs = 20
 batch_size = 32
 learning_rate = 1e-3
 img_height, img_width = 224, 224  # Replace with actual dimensions (dependent on autoencoder architecture)
@@ -179,3 +229,4 @@ with torch.no_grad():
             # save the numpy array as image
             plt.imsave(os.path.join(output_path, filenames[j]), output)
 
+mse_between_folders_grouped("output_imgs", "UCF_224x224x3_PNC_FrameCorr_input_imgs")
