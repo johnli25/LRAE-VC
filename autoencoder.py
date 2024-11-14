@@ -114,7 +114,7 @@ class PNC_Autoencoder(nn.Module):
         self.encoder2 = nn.Conv2d(16, 10, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (10, 32, 32)
 
         # Decoder
-        self.decoder1 = nn.ConvTranspose2d(10, 64, kernel_size=9, stride=7, padding=4)  # (10, 32, 32) -> (64, 224, 224)
+        self.decoder1 = nn.ConvTranspose2d(10, 64, kernel_size=9, stride=7, padding=4, output_padding=1)  # (10, 32, 32) -> (64, 224, 224)
         self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
         self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
         self.decoder4 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
@@ -253,7 +253,7 @@ if __name__ == "__main__":
     # Model, criterion, optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    model = ConvAutoencoder().to(device)
+    model = PNC_Autoencoder().to(device)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
