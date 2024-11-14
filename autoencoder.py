@@ -9,8 +9,65 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
-# Quick initial autoencoder, assuming input dim is 224x224x3
+
+
 class ConvAutoencoder(nn.Module):
+    def __init__(self):
+        super(ConvAutoencoder, self).__init__()
+        
+        # Encoder
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=4, stride=2, padding=1),  # (3, 224, 224) -> (64, 112, 112)
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),  # (64, 112, 112) -> (128, 56, 56)
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),  # (128, 56, 56) -> (256, 28, 28)
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),  # (256, 28, 28) -> (512, 14, 14)
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.Conv2d(512, 512, kernel_size=4, stride=2, padding=1),  # (512, 14, 14) -> (512, 7, 7)
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.01, inplace=True)
+        )
+
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.ConvTranspose2d(512, 512, kernel_size=4, stride=2, padding=1),  # (512, 7, 7) -> (512, 14, 14)
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1),  # (512, 14, 14) -> (256, 28, 28)
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),  # (256, 28, 28) -> (128, 56, 56)
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),  # (128, 56, 56) -> (64, 112, 112)
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.01, inplace=True),
+
+            nn.ConvTranspose2d(64, 3, kernel_size=4, stride=2, padding=1),  # (64, 112, 112) -> (3, 224, 224)
+            nn.Sigmoid()  # Ensure output is in [0, 1] range for normalized image reconstruction
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)  # Pass input through the encoder
+        x = self.decoder(x)  # Pass the encoded representation through the decoder
+        return x
+    
+
+# AJ's quick initial autoencoder, assuming input dim is 224x224x3
+class ConvAutoencoderAJ(nn.Module):
     def __init__(self):
         super(ConvAutoencoder, self).__init__()
         # Encoder
@@ -45,6 +102,49 @@ class ConvAutoencoder(nn.Module):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
+    
+
+
+class PNC_Autoencoder(nn.Module):
+    def __init__(self):
+        super(PNC_Autoencoder, self).__init__()
+
+        # Encoder
+        self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (16, 32, 32)
+        self.encoder2 = nn.Conv2d(16, 10, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (10, 32, 32)
+
+        # Decoder
+        self.decoder1 = nn.ConvTranspose2d(10, 64, kernel_size=9, stride=7, padding=4)  # (10, 32, 32) -> (64, 224, 224)
+        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
+        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
+        self.decoder4 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
+        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)  # (64, 224, 224) -> (3, 224, 224)
+
+        # Activation Functions
+        self.relu = nn.ReLU(inplace=True)
+        self.sigmoid = nn.Sigmoid()  # For output normalization in range [0, 1]
+
+    def forward(self, x):
+        # Encoder
+        x1 = self.relu(self.encoder1(x))  # (16, 32, 32)
+        x2 = self.relu(self.encoder2(x1))  # (10, 32, 32)
+
+        # Decoder with skip connections
+        y1 = self.relu(self.decoder1(x2))  # (64, 224, 224)
+
+        y2 = self.relu(self.decoder2(y1))  # (64, 224, 224)
+        y2 += y1 # Skip connection
+        y3 = self.relu(self.decoder3(y2))  # (64, 224, 224)
+        y4 = self.relu(self.decoder4(y3))  # (64, 224, 224)
+        y4 += y1  # Another skip connection
+
+        y5 = self.final_layer(y4)  # (3, 224, 224)
+        y5 = torch.clamp(y5, min=0, max=1)  # Ensure output is in [0, 1] range
+        return y5
+
+
+
+
 
 # Dataset class for loading images and ground truths
 class ImageDataset(Dataset):
@@ -99,159 +199,105 @@ def test_autoencoder(model, dataloader, criterion, device):
 
     return test_loss / len(dataloader.dataset)
 
-def calculate_mse(image1, image2):
-    """Calculate MSE between two image arrays."""
-    return np.mean((image1 - image2) ** 2)
 
-def get_prefix(filename):
-    """Extract prefix from filename, assuming prefix is before the last underscore."""
-    prefix = "_".join(filename.split("_")[:-1])
-    return prefix
+if __name__ == "__main__":
+    ## Hyperparameters
+    num_epochs = 30
+    batch_size = 32
+    learning_rate = 1e-3
+    img_height, img_width = 224, 224  # Dependent on autoencoder architecture
 
-def mse_between_folders_grouped(output_folder, input_folder):
-    mse_groups = defaultdict(list)
-    
-    # Iterate over each file in the output folder
-    for filename in os.listdir(output_folder):
-        input_path = os.path.join(input_folder, filename)
-        output_path = os.path.join(output_folder, filename)
+    # Data loading
+    transform = transforms.Compose([
+        transforms.Resize((img_height, img_width)),
+        transforms.ToTensor(),
+    ])
+
+    path = "UCF_224x224x3_PNC_FrameCorr_input_imgs/"
+
+    dataset = ImageDataset(path, path, transform=transform)
+
+    # Define test dataset using specified filenames
+    test_img_names = [
+        "diving_7", "diving_8", "golf_front_7", "golf_front_8", "kick_front_8", "kick_front_9",
+        "lifting_5", "lifting_6", "riding_horse_8", "riding_horse_9", "running_7", "running_8",
+        "running_9", "skating_8", "skating_9", "swing_bench_7", "swing_bench_8", "swing_bench_9"
+    ]
+
+    test_indices = [
+        i for i in range(len(dataset))
+        if "_".join(dataset.img_names[i].split("_")[:-1]) in test_img_names
+    ]
+    train_val_indices = [i for i in range(len(dataset)) if i not in test_indices]
+
+    # Split train_val_indices into train and validation
+    np.random.shuffle(train_val_indices)
+    train_size = int(0.8 * len(train_val_indices))
+    val_size = len(train_val_indices) - train_size
+
+    train_indices = train_val_indices[:train_size]
+    val_indices = train_val_indices[train_size:]
+
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+    test_dataset = Subset(dataset, test_indices)
+
+    print(f"Train dataset size: {len(train_dataset)}")
+    print(f"Validation dataset size: {len(val_dataset)}")
+    print(f"Test dataset size: {len(test_dataset)}")
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+    # Model, criterion, optimizer
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    model = ConvAutoencoder().to(device)
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+
+    # Training loop with validation
+    best_val_loss = float('inf')
+    for epoch in range(num_epochs):
+        # Train the model
+        train_loss = train_autoencoder(model, train_loader, criterion, optimizer, device)
         
-        # Check if a corresponding file exists in the input folder
-        if os.path.isfile(input_path) and os.path.isfile(output_path):
-            # Open and convert images to grayscale
-            img_input = Image.open(input_path).convert('RGB')
-            img_output = Image.open(output_path).convert('RGB')
-            
-            # Ensure the images are the same size
-            if img_input.size != img_output.size:
-                print(f"Skipping {filename}: images have different dimensions.")
-                continue
-            
-            # Convert images to numpy arrays
-            img_input = np.array(img_input)
-            img_output = np.array(img_output)
-            
-            # Calculate the MSE
-            mse = calculate_mse(img_input, img_output)
-            
-            # Group by prefix
-            prefix = get_prefix(filename)
-            mse_groups[prefix].append(mse)
-        else:
-            print(f"No corresponding file for {filename} in input folder.")
-    
-    # Calculate the average MSE for each group
-    average_mse_results = {prefix: np.mean(mse_list) for prefix, mse_list in mse_groups.items()}
-    
-    # Print the results
-    for prefix, avg_mse in average_mse_results.items():
-        print(f"Average MSE for {prefix}: {avg_mse}")
-    
-    return average_mse_results
+        # Validate the model
+        val_loss = test_autoencoder(model, val_loader, criterion, device)
+        
+        # Save the best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), "best_validation_autoencoder.pth")
+            print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
+        
+        print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
+    # Final test evaluation
+    test_loss = test_autoencoder(model, test_loader, criterion, device)
+    print(f"Final Test Loss: {test_loss:.4f}")
 
-## Hyperparameters
-num_epochs = 20
-batch_size = 32
-learning_rate = 1e-3
-img_height, img_width = 224, 224  # Dependent on autoencoder architecture
-
-# Data loading
-transform = transforms.Compose([
-    transforms.Resize((img_height, img_width)),
-    transforms.ToTensor(),
-])
-
-path = "UCF_224x224x3_PNC_FrameCorr_input_imgs/"
-
-dataset = ImageDataset(path, path, transform=transform)
-
-# Define test dataset using specified filenames
-test_img_names = [
-    "diving_7", "diving_8", "golf_front_7", "golf_front_8", "kick_front_8", "kick_front_9",
-    "lifting_5", "lifting_6", "riding_horse_8", "riding_horse_9", "running_7", "running_8",
-    "running_9", "skating_8", "skating_9", "swing_bench_7", "swing_bench_8", "swing_bench_9"
-]
-
-test_indices = [
-    i for i in range(len(dataset))
-    if "_".join(dataset.img_names[i].split("_")[:-1]) in test_img_names
-]
-train_val_indices = [i for i in range(len(dataset)) if i not in test_indices]
-
-# Split train_val_indices into train and validation
-np.random.shuffle(train_val_indices)
-train_size = int(0.8 * len(train_val_indices))
-val_size = len(train_val_indices) - train_size
-
-train_indices = train_val_indices[:train_size]
-val_indices = train_val_indices[train_size:]
-
-train_dataset = Subset(dataset, train_indices)
-val_dataset = Subset(dataset, val_indices)
-test_dataset = Subset(dataset, test_indices)
-
-print(f"Train dataset size: {len(train_dataset)}")
-print(f"Validation dataset size: {len(val_dataset)}")
-print(f"Test dataset size: {len(test_dataset)}")
-
-train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-# Model, criterion, optimizer
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Using device: {device}")
-model = ConvAutoencoder().to(device)
-criterion = nn.MSELoss()
-optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-# Training loop with validation
-best_val_loss = float('inf')
-for epoch in range(num_epochs):
-    # Train the model
-    train_loss = train_autoencoder(model, train_loader, criterion, optimizer, device)
-    
-    # Validate the model
-    val_loss = test_autoencoder(model, val_loader, criterion, device)
-    
-    # Save the best model
-    if val_loss < best_val_loss:
-        best_val_loss = val_loss
-        torch.save(model.state_dict(), "best_autoencoder.pth")
-        print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
-    
-    print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
-
-# Final test evaluation
-test_loss = test_autoencoder(model, test_loader, criterion, device)
-print(f"Final Test Loss: {test_loss:.4f}")
-
-# Save the final model
-torch.save(model.state_dict(), "autoencoder_final.pth")
+    # Save the final model
+    torch.save(model.state_dict(), "autoencoder_final.pth")
 
 
 
-# Save images generated by decoder 
-output_path = "output_imgs/"
-if not os.path.exists(output_path):
-    os.makedirs(output_path)
+    # Save images generated by decoder 
+    output_path = "output_imgs/"
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
 
-model.eval()
-print(f"Total number of batches in test_loader: {len(test_loader)}")
-print(f"Total number of samples in test_dataset: {len(test_loader.dataset)}")
-with torch.no_grad():
-    for i, (inputs, _, filenames) in enumerate(test_loader):
-        inputs = inputs.to(device)
-        outputs = model(inputs)
-        for j in range(inputs.size()[0]):
-            output = outputs[j].permute(1, 2, 0).cpu().numpy() # outputs[j] original shape is (3, 224, 224), which need to convert to -> (224, 224, 3)
-            # output = (output * 255).astype(np.uint8)
+    model.eval()
+    print(f"Total number of batches in test_loader: {len(test_loader)}")
+    print(f"Total number of samples in test_dataset: {len(test_loader.dataset)}")
+    with torch.no_grad():
+        for i, (inputs, _, filenames) in enumerate(test_loader):
+            inputs = inputs.to(device)
+            outputs = model(inputs)
+            for j in range(inputs.size()[0]):
+                output = outputs[j].permute(1, 2, 0).cpu().numpy() # outputs[j] original shape is (3, 224, 224), which need to convert to -> (224, 224, 3)
+                # output = (output * 255).astype(np.uint8)
 
-            # save the numpy array as image
-            plt.imsave(os.path.join(output_path, filenames[j]), output)
-
-
-
-# Calculate MSE between output images and input images
-mse_between_folders_grouped("output_imgs", "UCF_224x224x3_PNC_FrameCorr_input_imgs")
+                # save the numpy array as image
+                plt.imsave(os.path.join(output_path, filenames[j]), output)
