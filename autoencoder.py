@@ -252,6 +252,20 @@ if __name__ == "__main__":
     print(f"Validation dataset size: {len(val_dataset)}")
     print(f"Test dataset size: {len(test_dataset)}")
 
+    train_transform = transforms.Compose([
+      transforms.Resize((img_height, img_width)),
+      transforms.ToTensor(),
+      transforms.RandomHorizontalFlip(),
+      transforms.RandomVerticalFlip(),
+      transforms.RandomRotation(15),
+      transforms.RandomRotation([-30, 30])
+      ])
+    
+    # apply data augmentation to the train data
+    train_dataset.dataset.transform = train_transform  
+    val_dataset.dataset.transform = transform        
+    test_dataset.dataset.transform = transform
+
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
