@@ -104,7 +104,6 @@ class ConvAutoencoderAJ(nn.Module):
         return x
     
 
-
 class PNC_Autoencoder(nn.Module):
     def __init__(self):
         super(PNC_Autoencoder, self).__init__()
@@ -114,34 +113,41 @@ class PNC_Autoencoder(nn.Module):
         self.encoder2 = nn.Conv2d(16, 10, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (10, 32, 32)
 
         # Decoder
-        self.decoder1 = nn.ConvTranspose2d(10, 64, kernel_size=9, stride=7, padding=4, output_padding=1)  # (10, 32, 32) -> (64, 224, 224)
+        self.decoder1 = nn.ConvTranspose2d(10, 64, kernel_size=9, stride=7, padding=4, output_padding=6)  # (10, 32, 32) -> (64, 224, 224)
         self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
         self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
-        self.decoder4 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
         self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)  # (64, 224, 224) -> (3, 224, 224)
 
         # Activation Functions
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()  # For output normalization in range [0, 1]
 
     def forward(self, x):
         # Encoder
         x1 = self.relu(self.encoder1(x))  # (16, 32, 32)
+        # print(f"Shape after encoder1: {x1.shape}")
         x2 = self.relu(self.encoder2(x1))  # (10, 32, 32)
+        # print(f"Shape after encoder2: {x2.shape}")
 
-        # Decoder with skip connections
+        # Decoder
         y1 = self.relu(self.decoder1(x2))  # (64, 224, 224)
+        # print(f"Shape after decoder1: {y1.shape}")
 
         y2 = self.relu(self.decoder2(y1))  # (64, 224, 224)
-        y2 += y1 # Skip connection
+        # print(f"Shape after decoder2: {y2.shape}")
+        y2 = y2 + y1 # Skip connection
+
         y3 = self.relu(self.decoder3(y2))  # (64, 224, 224)
-        y4 = self.relu(self.decoder4(y3))  # (64, 224, 224)
-        y4 += y1  # Another skip connection
+        # print(f"Shape after decoder3: {y3.shape}")
+
+        y4 = self.relu(self.decoder3(y3))  # (64, 224, 224)
+        # print(f"Shape after decoder3 (second time): {y4.shape}")
+        y4 = y4 + y3  # Skip connection
 
         y5 = self.final_layer(y4)  # (3, 224, 224)
+        # print(f"Shape after final_layer: {y5.shape}")
         y5 = torch.clamp(y5, min=0, max=1)  # Ensure output is in [0, 1] range
         return y5
-
 
 
 
