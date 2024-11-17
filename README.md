@@ -10,7 +10,7 @@
 - [ ] Lots of overall architecture tuning
 
 ### Specific TODOs + Issues Log
-- [ ] Fix PNC dimension error
+- [x] ~~Fix PNC dimension error~~
 
 ### Important Notes
 
