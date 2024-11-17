@@ -1,7 +1,7 @@
 # LRAE-VC
 
 ## Commands, Instructions, Setup
-- Setting up Conda and GPUs: https://docs.google.com/document/d/1U5KpvcJr5ousA-zq9EcdzArJlSgpgM4wdYXXYV6tCLg/edit?tab=t.0 
+- Setting up server, Conda, and GPUs (based on UIUC NCSA's Delta server): https://docs.google.com/document/d/1U5KpvcJr5ousA-zq9EcdzArJlSgpgM4wdYXXYV6tCLg/edit?tab=t.0 
 - To run PNC autoencoder (no classification) `python autoencoder_train.py --model=PNC`
 - To run PNC autoencoder (with classification integrated) `python autoencoder_train.py --model=PNC_with_classification`
 
@@ -18,6 +18,7 @@
 - [x] ~~Fix PNC dimension error~~
 - [ ] Add percentage of labels classified correctly metric at the end
 
-### Important Notes
+### Notes + Other References:
+
 
 ### Dev Log
