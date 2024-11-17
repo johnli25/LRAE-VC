@@ -19,6 +19,6 @@
 - [ ] Add percentage of labels classified correctly metric at the end
 
 ### Notes + Other References:
-
+- Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
 
 ### Dev Log
