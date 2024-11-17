@@ -18,6 +18,7 @@
 - [x] ~~Fix PNC dimension error~~
 - [ ] Add percentage of labels classified correctly metric at the end
 
-### Important Notes
+### Notes + Other References:
+
 
 ### Dev Log
