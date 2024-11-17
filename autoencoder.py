@@ -149,6 +149,72 @@ class PNC_Autoencoder(nn.Module):
         y5 = torch.clamp(y5, min=0, max=1)  # Ensure output is in [0, 1] range
         return y5
 
+'''
+Used Deeper Encoder
+Leaky ReLU: Avoids dead neurons, especially with small gradients.
+Dropout: Reduces the chance of overfitting, especially in the decoder.
+'''
+class PNC_Autoencoder_Modified(nn.Module):
+    def __init__(self):
+        super(PNC_Autoencoder_Modified, self).__init__()
+
+        # Encoder
+        self.encoder1 = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=7, stride=2, padding=3),  # (3, 224, 224) -> (32, 112, 112)
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(0.1)
+        )
+        self.encoder2 = nn.Sequential(
+            nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2),  # (32, 112, 112) -> (64, 56, 56)
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.1)
+        )
+        self.encoder3 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),  # (64, 56, 56) -> (128, 28, 28)
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.1)
+        )
+
+        # Decoder
+        self.decoder1 = nn.Sequential(
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),  # (128, 28, 28) -> (64, 56, 56)
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.1)
+        )
+        self.decoder2 = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),  # (64, 56, 56) -> (32, 112, 112)
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(0.1)
+        )
+        self.decoder3 = nn.Sequential(
+            nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),  # (32, 112, 112) -> (16, 224, 224)
+            nn.BatchNorm2d(16),
+            nn.LeakyReLU(0.1)
+        )
+        self.final_layer = nn.Conv2d(16, 3, kernel_size=3, stride=1, padding=1)  # (16, 224, 224) -> (3, 224, 224)
+
+        # Regularization
+        self.dropout = nn.Dropout(0.3)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # Encoder
+        x1 = self.encoder1(x)  # (32, 112, 112)
+        x2 = self.encoder2(x1)  # (64, 56, 56)
+        x3 = self.encoder3(x2)  # (128, 28, 28)
+
+        # Decoder
+        y1 = self.decoder1(x3)  # (64, 56, 56)
+        y1 = y1 + x2  # Skip connection
+
+        y2 = self.decoder2(y1)  # (32, 112, 112)
+        y2 = y2 + x1  # Skip connection
+
+        y3 = self.decoder3(y2)  # (16, 224, 224)
+
+        y4 = self.final_layer(self.dropout(y3))  # (3, 224, 224)
+        y5 = self.sigmoid(y4)  # Normalize output to [0, 1]
+        return y5
 
 
 
@@ -206,6 +272,23 @@ def test_autoencoder(model, dataloader, criterion, device):
     return test_loss / len(dataloader.dataset)
 
 
+def plot_train_val_loss(train_losses, val_losses):
+    epochs = range(1, len(train_losses) + 1)
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, train_losses, label='Training Loss', color='blue', marker='o')
+    plt.plot(epochs, val_losses, label='Validation Loss', color='orange', marker='o')
+    
+    plt.title('Training and Validation Loss', fontsize=16)
+    plt.xlabel('Epochs', fontsize=14)
+    plt.ylabel('Loss', fontsize=14)
+    plt.legend(fontsize=12)
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+
+    plt.savefig(save_path+'train_val_loss_curve.png', dpi=300)
+    plt.show()
+
+    
 if __name__ == "__main__":
     ## Hyperparameters
     num_epochs = 30
@@ -262,7 +345,7 @@ if __name__ == "__main__":
       ])
     
     # apply data augmentation to the train data
-    train_dataset.dataset.transform = train_transform  
+    train_dataset.dataset.transform = transform
     val_dataset.dataset.transform = transform        
     test_dataset.dataset.transform = transform
 
@@ -273,23 +356,26 @@ if __name__ == "__main__":
     # Model, criterion, optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    model = PNC_Autoencoder().to(device)
+    model = PNC_Autoencoder_Modified().to(device)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
+    train_losses = []
+    val_losses = []
+    save_path = ''
     # Training loop with validation
     best_val_loss = float('inf')
     for epoch in range(num_epochs):
         # Train the model
         train_loss = train_autoencoder(model, train_loader, criterion, optimizer, device)
-        
+        train_losses.append(train_loss)
         # Validate the model
         val_loss = test_autoencoder(model, val_loader, criterion, device)
-        
+        val_losses.append(val_loss)
         # Save the best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), "best_validation_autoencoder.pth")
+            torch.save(model.state_dict(), save_path+"best_validation_autoencoder.pth")
             print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
         
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
@@ -299,7 +385,7 @@ if __name__ == "__main__":
     print(f"Final Test Loss: {test_loss:.4f}")
 
     # Save the final model
-    torch.save(model.state_dict(), "autoencoder_final.pth")
+    torch.save(model.state_dict(), save_path+"autoencoder_final.pth")
 
 
 
@@ -321,3 +407,4 @@ if __name__ == "__main__":
 
                 # save the numpy array as image
                 plt.imsave(os.path.join(output_path, filenames[j]), output)
+    plot_train_val_loss(train_losses, val_losses)
