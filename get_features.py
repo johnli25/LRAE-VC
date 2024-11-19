@@ -9,6 +9,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
 
+# TODO: 
+# THIS NEEDS TO BE UPDATED WITH WHATEVER OUR FINAL AUTOENCODER IMPLEMENTATION IS
 class PNC_Autoencoder(nn.Module):
     def __init__(self):
         super(PNC_Autoencoder, self).__init__()
@@ -130,6 +132,7 @@ def save_encoder_features(model, dataloader, output_dir, device):
                 np.save(feature_filename, feature_array)  # Save as .npy file
                 print(f"Saved features for {filenames[i]} to {feature_filename}")
 
+# COMBINES FRAMES FROM SAME VIDEO INTO ONE TENSOR
 def group_and_combine_features(folder_path, output_folder):
     # Dictionary to store grouped arrays based on prefixes
     grouped_features = defaultdict(list)
@@ -178,5 +181,5 @@ if __name__ == "__main__":
     encoder_features_folder = "encoder_features/"
     combined_features_folder = "combined_features/"
 
-    save_encoder_features(model, data_loader, features_output_dir, device)
-    group_and_combine_features(encoder_features_folder, combined_features_folder)
+    save_encoder_features(model, data_loader, features_output_dir, device) # Saving latent features for each frame
+    group_and_combine_features(encoder_features_folder, combined_features_folder) # 
