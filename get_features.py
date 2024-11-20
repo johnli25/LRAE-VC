@@ -8,9 +8,80 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
+import argparse
 
 # TODO: 
-# THIS NEEDS TO BE UPDATED WITH WHATEVER OUR FINAL AUTOENCODER IMPLEMENTATION IS
+# ADD FINAL LRAE-VC Architecture
+    
+class LRAE_VC_Autoencoder(nn.Module):
+    def __init__(self):
+        super(LRAE_VC_Autoencoder, self).__init__()
+
+        # Encoder
+        self.encoder1 = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=7, stride=2, padding=3),  # (3, 224, 224) -> (32, 112, 112)
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(0.1)
+        )
+        self.encoder2 = nn.Sequential(
+            nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2),  # (32, 112, 112) -> (64, 56, 56)
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.1)
+        )
+        self.encoder3 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),  # (64, 56, 56) -> (128, 28, 28)
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.1)
+        )
+
+        # Decoder
+        self.decoder1 = nn.Sequential(
+            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),  # (128, 28, 28) -> (64, 56, 56)
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.1)
+        )
+        self.decoder2 = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),  # (64, 56, 56) -> (32, 112, 112)
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(0.1)
+        )
+        self.decoder3 = nn.Sequential(
+            nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),  # (32, 112, 112) -> (16, 224, 224)
+            nn.BatchNorm2d(16),
+            nn.LeakyReLU(0.1)
+        )
+        self.final_layer = nn.Conv2d(16, 3, kernel_size=3, stride=1, padding=1)  # (16, 224, 224) -> (3, 224, 224)
+
+        # Regularization
+        self.dropout = nn.Dropout(0.3)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # Encoder
+        x1 = self.encoder1(x)  # (32, 112, 112)
+        x2 = self.encoder2(x1)  # (64, 56, 56)
+        x3 = self.encoder3(x2)  # (128, 28, 28)
+
+        # Decoder
+        y1 = self.decoder1(x3)  # (64, 56, 56)
+        y1 = y1 + x2  # Skip connection
+
+        y2 = self.decoder2(y1)  # (32, 112, 112)
+        y2 = y2 + x1  # Skip connection
+
+        y3 = self.decoder3(y2)  # (16, 224, 224)
+
+        y4 = self.final_layer(self.dropout(y3))  # (3, 224, 224)
+        y5 = self.sigmoid(y4)  # Normalize output to [0, 1]
+        return y5
+    
+    def encode(self, x):
+        # Encoder
+        x1 = self.encoder1(x)  # (32, 112, 112)
+        x2 = self.encoder2(x1)  # (64, 56, 56)
+        x3 = self.encoder3(x2)  # (128, 28, 28)
+        return x3
+    
 class PNC_Autoencoder(nn.Module):
     def __init__(self):
         super(PNC_Autoencoder, self).__init__()
@@ -87,35 +158,6 @@ class ImageDataset(Dataset):
             ground_truth = self.transform(ground_truth)
 
         return image, ground_truth, self.img_names[idx]
-
-#Testing and training
-def train_autoencoder(model, dataloader, criterion, optimizer, device):
-    model.train()
-    train_loss = 0
-    for inputs, targets, _ in dataloader:
-        inputs, targets = inputs.to(device), targets.to(device)
-
-        optimizer.zero_grad()
-        outputs = model(inputs)
-        loss = criterion(outputs, targets)
-        loss.backward()
-        optimizer.step()
-
-        train_loss += loss.item() * inputs.size(0)
-
-    return train_loss / len(dataloader.dataset)
-
-def test_autoencoder(model, dataloader, criterion, device):
-    model.eval()
-    test_loss = 0
-    with torch.no_grad():
-        for inputs, targets, _ in dataloader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            test_loss += loss.item() * inputs.size(0)
-
-    return test_loss / len(dataloader.dataset)
     
 # Save features to a file
 def save_encoder_features(model, dataloader, output_dir, device):
@@ -139,6 +181,7 @@ def group_and_combine_features(folder_path, output_folder):
 
     # Iterate over all files in the folder
     for filename in os.listdir(folder_path):
+        print(filename)
         if filename.endswith(".npy"):
             # Extract the prefix (everything before the last underscore)
             prefix = "_".join(filename.split("_")[:-1])
@@ -156,6 +199,7 @@ def group_and_combine_features(folder_path, output_folder):
 
         # Save the combined array to a new file
         output_file = os.path.join(output_folder, f"{prefix}_combined.npy")
+        print(combined_features.shape)
         np.save(output_file, combined_features)
         print(f"Saved combined features for prefix '{prefix}' to '{output_file}'")
 
@@ -163,8 +207,10 @@ if __name__ == "__main__":
     
     # Load the trained model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # COMMENT OUT THESE TWO LINES THE SECOND TIME (See Note at Bottom)
     model = PNC_Autoencoder().to(device)
-    model.load_state_dict(torch.load("best_validation_autoencoder.pth"))
+    model.load_state_dict(torch.load("PNC_best_validation.pth"))
     
     img_height, img_width = 224, 224  # Dependent on autoencoder architecture
     batch_size = 32
@@ -177,9 +223,12 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     # Save encoder features for test set
-    features_output_dir = "encoder_features/"
-    encoder_features_folder = "encoder_features/"
-    combined_features_folder = "combined_features/"
+    features_output_dir = "PNC_encoder_features/"
+    encoder_features_folder = "PNC_encoder_features/"
+    combined_features_folder = "PNC_combined_features/"
 
+    # NOTE: This behaves weirdly right now and wont run both. So, run this script twice. On the first one, comment out group_and_combine features. On the second one,
+    # uncomment group_and_combine features, and comment save_encoder_features, as well as the two lines pertaining to the model seen above.
+    # After these two runs, you can proceed to feature_filling.py
     save_encoder_features(model, data_loader, features_output_dir, device) # Saving latent features for each frame
-    group_and_combine_features(encoder_features_folder, combined_features_folder) # 
+    group_and_combine_features(encoder_features_folder, combined_features_folder) 
