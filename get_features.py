@@ -207,8 +207,10 @@ if __name__ == "__main__":
     
     # Load the trained model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    #model = PNC_Autoencoder().to(device)
-    #model.load_state_dict(torch.load("PNC_best_validation.pth"))
+
+    # COMMENT OUT THESE TWO LINES THE SECOND TIME (See Note at Bottom)
+    model = PNC_Autoencoder().to(device)
+    model.load_state_dict(torch.load("PNC_best_validation.pth"))
     
     img_height, img_width = 224, 224  # Dependent on autoencoder architecture
     batch_size = 32
@@ -225,6 +227,8 @@ if __name__ == "__main__":
     encoder_features_folder = "PNC_encoder_features/"
     combined_features_folder = "PNC_combined_features/"
 
-    # If this doesnt work, run just save_encoder_features and just group_and_combine_features (might have to run group_and_combine_features without cuda)
-    #save_encoder_features(model, data_loader, features_output_dir, device) # Saving latent features for each frame
+    # NOTE: This behaves weirdly right now and wont run both. So, run this script twice. On the first one, comment out group_and_combine features. On the second one,
+    # uncomment group_and_combine features, and comment save_encoder_features, as well as the two lines pertaining to the model seen above.
+    # After these two runs, you can proceed to feature_filling.py
+    save_encoder_features(model, data_loader, features_output_dir, device) # Saving latent features for each frame
     group_and_combine_features(encoder_features_folder, combined_features_folder) 
