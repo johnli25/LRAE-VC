@@ -9,100 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
 import argparse
-
-
-
-class ConvAutoencoder(nn.Module):
-    def __init__(self):
-        super(ConvAutoencoder, self).__init__()
-        
-        # Encoder
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=4, stride=2, padding=1),  # (3, 224, 224) -> (64, 112, 112)
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU(0.01, inplace=True),
-
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),  # (64, 112, 112) -> (128, 56, 56)
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.01, inplace=True),
-
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),  # (128, 56, 56) -> (256, 28, 28)
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.01, inplace=True),
-
-            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),  # (256, 28, 28) -> (512, 14, 14)
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.01, inplace=True),
-
-            nn.Conv2d(512, 512, kernel_size=4, stride=2, padding=1),  # (512, 14, 14) -> (512, 7, 7)
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.01, inplace=True)
-        )
-
-        # Decoder
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(512, 512, kernel_size=4, stride=2, padding=1),  # (512, 7, 7) -> (512, 14, 14)
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(0.01, inplace=True),
-
-            nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1),  # (512, 14, 14) -> (256, 28, 28)
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(0.01, inplace=True),
-
-            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),  # (256, 28, 28) -> (128, 56, 56)
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(0.01, inplace=True),
-
-            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),  # (128, 56, 56) -> (64, 112, 112)
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU(0.01, inplace=True),
-
-            nn.ConvTranspose2d(64, 3, kernel_size=4, stride=2, padding=1),  # (64, 112, 112) -> (3, 224, 224)
-            nn.Sigmoid()  # Ensure output is in [0, 1] range for normalized image reconstruction
-        )
-
-    def forward(self, x):
-        x = self.encoder(x)  # Pass input through the encoder
-        x = self.decoder(x)  # Pass the encoded representation through the decoder
-        return x
-    
-
-# AJ's quick initial autoencoder, assuming input dim is 224x224x3
-class ConvAutoencoderAJ(nn.Module):
-    def __init__(self):
-        super(ConvAutoencoder, self).__init__()
-        # Encoder
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, 64, kernel_size=4, stride=2, padding=1),  # Input: (3, 224, 224) -> Output: (64, 112, 112)
-            nn.ReLU(True),
-            nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1), # Output: (128, 56, 56)
-            nn.ReLU(True),
-            nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1), # Output: (256, 28, 28)
-            nn.ReLU(True),
-            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1), # Output: (512, 14, 14)
-            nn.ReLU(True),
-            nn.Conv2d(512, 1024, kernel_size=4, stride=2, padding=1), # Output: (1024, 7, 7)
-            nn.ReLU(True)
-        )
-
-        # Decoder
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(1024, 512, kernel_size=4, stride=2, padding=1), # Output: (512, 14, 14)
-            nn.ReLU(True),
-            nn.ConvTranspose2d(512, 256, kernel_size=4, stride=2, padding=1), # Output: (256, 28, 28)
-            nn.ReLU(True),
-            nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1), # Output: (128, 56, 56)
-            nn.ReLU(True),
-            nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),  # Output: (64, 112, 112)
-            nn.ReLU(True),
-            nn.ConvTranspose2d(64, 3, kernel_size=4, stride=2, padding=1),    # Output: (3, 224, 224)
-            nn.Sigmoid()  # For pixel values in range [0,1]
-        )
-
-    def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
+from transformers import FlavaProcessor, FlavaModel
     
 
 class PNC_Autoencoder(nn.Module):
@@ -579,5 +486,9 @@ if __name__ == "__main__":
 
                 # save the numpy array as image
                 plt.imsave(os.path.join(output_path, filenames[j]), output)
+
+
+
+
 
 
