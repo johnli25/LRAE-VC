@@ -10,42 +10,47 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 import argparse
 from transformers import FlavaProcessor, FlavaModel
-    
+
+
 
 class PNC_Autoencoder(nn.Module):
     def __init__(self):
         super(PNC_Autoencoder, self).__init__()
-
         # Encoder
-        self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (16, 32, 32)
-        self.encoder2 = nn.Conv2d(16, 10, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (10, 32, 32)
+        self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)
+        self.encoder2 = nn.Conv2d(16, 10, kernel_size=3, stride=1, padding=1)
 
         # Decoder
-        self.decoder1 = nn.ConvTranspose2d(10, 64, kernel_size=9, stride=7, padding=4, output_padding=6)  # (10, 32, 32) -> (64, 224, 224)
-        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
-        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
-        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)  # (64, 224, 224) -> (3, 224, 224)
+        self.decoder1 = nn.ConvTranspose2d(10, 64, kernel_size=9, stride=7, padding=4, output_padding=6)
+        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
+        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
+        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1,  padding=1)
 
-        # Activation Functions
         self.relu = nn.ReLU()
-        self.sigmoid = nn.Sigmoid()  # For output normalization in range [0, 1]
 
-    def forward(self, x):
+    def forward(self, x, tail_length=None):
         # Encoder
-        x1 = self.relu(self.encoder1(x))  # (16, 32, 32)
-        x2 = self.relu(self.encoder2(x1))  # (10, 32, 32)
+        x1 = self.relu(self.encoder1(x))
+        x2 = self.relu(self.encoder2(x1))
+
+        if tail_length is not None:
+            # Zero out tail features for all samples in the batch
+            batch_size, channels, _, _ = x2.size()
+            tail_start = channels - tail_length
+            x2 = x2.clone() # Create a copy of the tensor to avoid in-place operations!
+            x2[:, tail_start:, :, :] = 0
 
         # Decoder
-        y1 = self.relu(self.decoder1(x2))  # (64, 224, 224)
-        y2 = self.relu(self.decoder2(y1))  # (64, 224, 224)
-        y2 = y2 + y1 # Skip connection
-        y3 = self.relu(self.decoder3(y2))  # (64, 224, 224)
-        y4 = self.relu(self.decoder3(y3))  # (64, 224, 224)
+        y1 = self.relu(self.decoder1(x2))
+        y2 = self.relu(self.decoder2(y1))
+        y2 = y2 + y1  # Skip connection
+        y3 = self.relu(self.decoder3(y2))
+        y4 = self.relu(self.decoder3(y3))
         y4 = y4 + y3  # Skip connection
-        y5 = self.final_layer(y4)  # (3, 224, 224)
-        y5 = torch.clamp(y5, min=0, max=1)  # Ensure output is in [0, 1] range
+        y5 = self.final_layer(y4)
+        y5 = torch.clamp(y5, min=0, max=1)
 
-        return y5 # Return (decoded image, classification output label)
+        return y5
     
 
 
@@ -164,8 +169,6 @@ class PNC_Autoencoder_with_Classification(nn.Module):
 
 
 
-
-
 # Dataset class for loading images and ground truths
 class ImageDataset(Dataset):
     def __init__(self, img_dir, gt_dir, transform=None):
@@ -192,18 +195,22 @@ class ImageDataset(Dataset):
 
 
 # Testing and training
-def train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, model_name):
+def train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
+
     for epoch in range(num_epochs):
         # Train the model
         model.train()
         train_loss = 0
         for inputs, targets, _ in train_loader:
+            # Sample a single tail length for the batch
+            torch.manual_seed(seed=42)
+            tail_len = torch.randint(0, max_tail_length + 1, (1,)).item()
             inputs, targets = inputs.to(device), targets.to(device)
 
             optimizer.zero_grad()
-            outputs = model(inputs)
+            outputs = model(inputs, tail_length=tail_len) # NOTE: set tail_length=None to use the full sequence OR set tail_length=tail_length to enable stochastic tail-dropout
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
@@ -214,7 +221,7 @@ def train_autoencoder(model, train_loader, val_loader, criterion, optimizer, dev
         train_losses.append(train_loss)
 
         # Validate the model
-        val_loss = test_autoencoder(model, val_loader, criterion, device)
+        val_loss = test_autoencoder(model, val_loader, criterion, device, max_tail_length)
         val_losses.append(val_loss)
 
         # Save the best model
@@ -226,25 +233,29 @@ def train_autoencoder(model, train_loader, val_loader, criterion, optimizer, dev
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
     # Final Test
-    test_loss = test_autoencoder(model, test_loader, criterion, device)
+    test_loss = test_autoencoder(model, test_loader, criterion, device, max_tail_length)
     print(f"Final Test Loss: {test_loss:.4f}")
 
-    plot_train_val_loss(train_losses, val_losses) # Plot training and validation loss over time/epochs
+    plot_train_val_loss(train_losses, val_losses)
 
     # Save final model
     torch.save(model.state_dict(), f"{model_name}_final.pth")
 
-def test_autoencoder(model, dataloader, criterion, device):
+
+def test_autoencoder(model, dataloader, criterion, device, max_tail_length):
     model.eval()
     test_loss = 0
     with torch.no_grad():
         for inputs, targets, _ in dataloader:
+            torch.manual_seed(seed=41)
+            tail_len = torch.randint(0, max_tail_length + 1, (1,)).item()
             inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
+            outputs = model(inputs, tail_length=tail_len) # NOTE: set tail_length=None to use the full sequence OR set tail_length=tail_length to enable stochastic tail-dropout
             loss = criterion(outputs, targets)
             test_loss += loss.item() * inputs.size(0)
 
     return test_loss / len(dataloader.dataset)
+
 
 
 
@@ -447,7 +458,8 @@ if __name__ == "__main__":
         model = PNC_Autoencoder().to(device)
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model)
+        max_tail_length = 10
+        train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length)
         
     if args.model == "LRAE_VC":
         model = LRAE_VC_Autoencoder().to(device)
