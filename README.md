@@ -17,7 +17,10 @@
 
 ### Specific TODOs + Issues Log
 - [x] ~~Fix PNC dimension error~~
-- [ ] Add percentage of labels classified correctly metric at the end
+- [x] ~~Add percentage of labels classified correctly metric at the end~~
+- [ ] Run/Train train_combined_model and fix any issues
+- [ ] Train a separate classification model on the DECODED images (which are assumed to be on server side btw)
+- [ ] Run/Train AJ's LSTM-feature filling code (get_features.py and feature_filling.py). 
 
 ### Notes + Other References:
 - Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
