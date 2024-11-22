@@ -23,7 +23,8 @@
 - [ ] Run/Train AJ's LSTM-feature filling code (get_features.py and feature_filling.py).
 - [ ] EXPERIMENT TASK: Create and implement sender_encode.py to send data back and forth btwn sender and receiver for LRAE-VC (no drops/misses)
 - [ ] EXPERIMENT TASK: Send data back and forth btwn sender and receiver for PNC (**WITH** random packet drops + deadline messes. Can just manually drop them from the sender if you wanna "cheat" instead of setting up any actual networking LOL. 
-- [ ] EXPERIMENT TASK: Same thing as above but for LRAE-VC (MAKE SURE TO USE LSTM-BASED FEATURE FILLING MODEL!) 
+- [ ] EXPERIMENT TASK: Same thing as above but for LRAE-VC (MAKE SURE TO USE LSTM-BASED FEATURE FILLING MODEL!)
+- [ ] Start creating slides and writing final report 
 
 ### Notes + Other References:
 - Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
