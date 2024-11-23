@@ -19,8 +19,12 @@
 - [x] ~~Fix PNC dimension error~~
 - [x] ~~Add percentage of labels classified correctly metric at the end~~
 - [ ] Run/Train train_combined_model and fix any issues
-- [ ] Train a separate classification model on the DECODED images (which are assumed to be on server side btw)
-- [ ] Run/Train AJ's LSTM-feature filling code (get_features.py and feature_filling.py). 
+- [ ] Train a separate classification model on the DECODED images (which are assumed to be on server side btw. No need to run encoder/autoencoder for this!)
+- [ ] Run/Train AJ's LSTM-feature filling code (get_features.py and feature_filling.py).
+- [ ] EXPERIMENT TASK: Create and implement sender_encode.py to send data back and forth btwn sender and receiver for LRAE-VC (no drops/misses)
+- [ ] EXPERIMENT TASK: Send data back and forth btwn sender and receiver for PNC (**WITH** random packet drops + deadline messes. Can just manually drop them from the sender if you wanna "cheat" instead of setting up any actual networking LOL. 
+- [ ] EXPERIMENT TASK: Same thing as above but for LRAE-VC (MAKE SURE TO USE LSTM-BASED FEATURE FILLING MODEL!)
+- [ ] Start creating slides and writing final report 
 
 ### Notes + Other References:
 - Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
