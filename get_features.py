@@ -203,6 +203,40 @@ def group_and_combine_features(folder_path, output_folder):
         np.save(output_file, combined_features)
         print(f"Saved combined features for prefix '{prefix}' to '{output_file}'")
 
+def process_and_save_features(model, dataloader, output_folder, device):
+    """
+    Extracts encoder features, groups them by video, and saves combined tensors.
+    Args:
+        model: The neural network model with an encoder.
+        dataloader: DataLoader providing inputs and filenames.
+        output_folder: Directory to save combined features.
+        device: Device to perform computation on (e.g., 'cuda' or 'cpu').
+    """
+    model.eval()  # Set model to evaluation mode
+    os.makedirs(output_folder, exist_ok=True)
+
+    grouped_features = defaultdict(list)  # Dictionary to store grouped features
+
+    with torch.no_grad():
+        for inputs, _, filenames in dataloader:
+            inputs = inputs.to(device)
+            features = model.encode(inputs)  # Extract features using encoder
+
+            # Group features by video prefix
+            for i in range(inputs.size(0)):
+                prefix = "_".join(filenames[i].split("_")[:-1])
+                feature_array = features[i].cpu().numpy()
+                grouped_features[prefix].append(feature_array)
+
+    # Combine and save grouped features
+    for prefix, feature_list in grouped_features.items():
+        combined_features = np.stack(feature_list, axis=0)  # Combine features
+        output_file = os.path.join(output_folder, f"{prefix}_combined.npy")
+        np.save(output_file, combined_features)
+        print(f"Saved combined features for prefix '{prefix}' to '{output_file}'")
+
+
+
 if __name__ == "__main__":
     
     # Load the trained model
@@ -210,7 +244,7 @@ if __name__ == "__main__":
 
     # COMMENT OUT THESE TWO LINES THE SECOND TIME (See Note at Bottom)
     model = PNC_Autoencoder().to(device)
-    model.load_state_dict(torch.load("PNC_best_validation.pth"))
+    model.load_state_dict(torch.load("PNC_final.pth"))
     
     img_height, img_width = 224, 224  # Dependent on autoencoder architecture
     batch_size = 32
@@ -232,3 +266,4 @@ if __name__ == "__main__":
     # After these two runs, you can proceed to feature_filling.py
     save_encoder_features(model, data_loader, features_output_dir, device) # Saving latent features for each frame
     group_and_combine_features(encoder_features_folder, combined_features_folder) 
+    # process_and_save_features(model, data_loader, "PNC_combined_features_v2", device)

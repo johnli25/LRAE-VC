@@ -89,7 +89,7 @@ def train_feature_filling(model, dataloader, criterion, optimizer, device):
             num_zeroes = np.random.randint(1, 6) # introduce up to 5 (?) dropped frames if we can handle it
 
         #randomly set some frames to 0 for our input image
-        for i in range(num_zeroes):
+        for _ in range(num_zeroes):
             random_idx = np.random.randint(0, features.shape[1])
             features[0][random_idx] = torch.zeros((features.size()[2], features.size()[3])) # THIS SHOULD BE 28x28 rn??? NEEDS TO CHANGE TO WHATEVER OUR FEATURE SSIZE IS
 
@@ -121,7 +121,7 @@ def test_feature_filling(model, dataloader, criterion, optimizer, device):
             num_zeroes = np.random.randint(1, 6) # introduce up to 5 (?) dropped frames if we can handle it
 
         #randomly set some frames to 0 for our input image
-        for i in range(num_zeroes):
+        for _ in range(num_zeroes):
             random_idx = np.random.randint(0, features.shape[1])
             features[0][random_idx] = torch.zeros((features.size()[2], features.size()[3])) # THIS SHOULD BE 28x28 rn??? NEEDS TO CHANGE TO WHATEVER OUR FEATURE SSIZE IS
 
