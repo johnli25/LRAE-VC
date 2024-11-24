@@ -159,6 +159,7 @@ class ImageDataset(Dataset):
 
         return image, ground_truth, self.img_names[idx]
     
+
 # Save features to a file
 def save_encoder_features(model, dataloader, output_dir, device):
     model.eval()  # Set model to evaluation mode
@@ -203,6 +204,8 @@ def group_and_combine_features(folder_path, output_folder):
         np.save(output_file, combined_features)
         print(f"Saved combined features for prefix '{prefix}' to '{output_file}'")
 
+
+    
 def process_and_save_features(model, dataloader, output_folder, device):
     """
     Extracts encoder features, groups them by video, and saves combined tensors.
@@ -257,13 +260,12 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     # Save encoder features for test set
-    features_output_dir = "PNC_encoder_features/"
-    encoder_features_folder = "PNC_encoder_features/"
+    # features_output_dir = "PNC_encoder_features/"
     combined_features_folder = "PNC_combined_features/"
 
     # NOTE: This behaves weirdly right now and wont run both. So, run this script twice. On the first one, comment out group_and_combine features. On the second one,
     # uncomment group_and_combine features, and comment save_encoder_features, as well as the two lines pertaining to the model seen above.
     # After these two runs, you can proceed to feature_filling.py
-    save_encoder_features(model, data_loader, features_output_dir, device) # Saving latent features for each frame
-    group_and_combine_features(encoder_features_folder, combined_features_folder) 
-    # process_and_save_features(model, data_loader, "PNC_combined_features_v2", device)
+    # save_encoder_features(model, data_loader, features_output_dir, device) # Saving latent features for each frame
+    # group_and_combine_features(features_output_dir, combined_features_folder) 
+    process_and_save_features(model, data_loader, combined_features_folder, device)

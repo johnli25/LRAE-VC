@@ -29,6 +29,7 @@ class CustomDataset(Dataset):
             tuple: (sequence_item) tensor of shape (X, 32, 32), where X is the number of sequence items in the file
         """
         file_path = self.file_paths[idx]
+        filename = os.path.basename(file_path)
         
         # Load the file (assuming it's in numpy format)
         data = np.load(file_path)  # This will be of shape (10, X, 32, 32)... (128, X, 28, 28) ???
@@ -38,7 +39,7 @@ class CustomDataset(Dataset):
         sequence_item = swapped_data[self.num]  
         
         # Convert to a torch tensor
-        return torch.tensor(sequence_item, dtype=torch.float32)
+        return torch.tensor(sequence_item, dtype=torch.float32), filename
 
 class FrameSequenceLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
@@ -75,9 +76,9 @@ class FrameSequenceLSTM(nn.Module):
 def train_feature_filling(model, dataloader, criterion, optimizer, device):
     model.train()
     epoch_loss = 0
-    for features in dataloader:
+    for features, filename in dataloader:
         features = features.to(device)
-        #print(features.size())
+        # print("filename and features size: ", filename, features.size())
         target = features.clone().detach().to(device)
 
         # this is pretty arbitrary and can be changed
@@ -91,7 +92,7 @@ def train_feature_filling(model, dataloader, criterion, optimizer, device):
         #randomly set some frames to 0 for our input image
         for _ in range(num_zeroes):
             random_idx = np.random.randint(0, features.shape[1])
-            features[0][random_idx] = torch.zeros((features.size()[2], features.size()[3])) # THIS SHOULD BE 28x28 rn??? NEEDS TO CHANGE TO WHATEVER OUR FEATURE SSIZE IS
+            features[0][random_idx] = torch.zeros((features.size()[2], features.size()[3])) # NOTE: can be 32x32, 28x28, etc. 
 
         output_seq = model(features)
         loss = criterion(output_seq, target)
@@ -107,9 +108,9 @@ def train_feature_filling(model, dataloader, criterion, optimizer, device):
 def test_feature_filling(model, dataloader, criterion, optimizer, device):
     model.eval()
     epoch_loss = 0
-    for features in dataloader:
+    for features, filename in dataloader:
         features = features.to(device)
-        #print(features.size())
+        # print("filename and features size: ", filename, features.size())
         target = features.clone().detach().to(device)
 
         # this is pretty arbitrary and can be changed
@@ -147,9 +148,6 @@ num_features = 10 # Number of latent features
 # Initialize model, loss, and optimizer
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
-#model = FrameSequenceLSTM(input_dim, hidden_dim, output_dim, num_layers).to(device)
-#criterion = nn.MSELoss()
-#optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 for i in range(num_features):
     # WILL NEED TO ITERATE HERE FOR EVERY FEATURE INDEX
@@ -157,7 +155,7 @@ for i in range(num_features):
     model = FrameSequenceLSTM(input_dim, hidden_dim, output_dim, num_layers).to(device) # new model for every iteration?
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    dataset = CustomDataset(folder_path, i) # the number dictates which feature we are training (right now im just training for feature 0, but we will need to do this 10 (or 128?) times)
+    dataset = CustomDataset(folder_path, i) # the number dictates which feature we are training (e.g. 0-10)
 
     all_indices = list(range(len(dataset)))
     np.random.shuffle(all_indices)
