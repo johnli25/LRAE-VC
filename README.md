@@ -15,7 +15,9 @@ python receiver_decode.py --model_path="PNC_final_no_dropouts.pth" --host=127.0.
 ```
 and wait till it says "Listening on ..."
 - Then run sender:
-```python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --model_path="PNC_final_no_dropouts.pth" --host=127.0.0.1 --port=8080```
+```
+python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --model_path="PNC_final_no_dropouts.pth" --host=127.0.0.1 --port=8080
+```
 
 #### Team: John Li, AJ Grama, Wenjie Guo
 
