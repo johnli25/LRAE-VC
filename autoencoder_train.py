@@ -244,11 +244,11 @@ if __name__ == "__main__":
     dataset = ImageDataset(path, path, transform=transform)
 
     # Define test dataset using specified filenames
-    test_img_names = [
+    test_img_names = {
         "diving_7", "diving_8", "golf_front_7", "golf_front_8", "kick_front_8", "kick_front_9",
         "lifting_5", "lifting_6", "riding_horse_8", "riding_horse_9", "running_7", "running_8",
         "running_9", "skating_8", "skating_9", "swing_bench_7", "swing_bench_8", "swing_bench_9"
-    ]
+    }
 
     test_indices = [
         i for i in range(len(dataset))

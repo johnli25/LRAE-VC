@@ -123,7 +123,7 @@ if __name__ == "__main__":
 
     # COMMENT OUT THESE TWO LINES THE SECOND TIME (See Note at Bottom)
     model = PNC_Autoencoder().to(device)
-    model.load_state_dict(torch.load(".pth")) # NOTE: Load full-features/no random drops model! 
+    model.load_state_dict(torch.load("PNC_final_no_dropouts.pth")) # NOTE: Load full-features/no random drops model! 
     
     img_height, img_width = 224, 224  # Dependent on autoencoder architecture
     batch_size = 32
