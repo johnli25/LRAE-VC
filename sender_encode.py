@@ -50,7 +50,8 @@ def encode_and_send(input_dir, model, host, port, device):
     try:
         last_video_identifier = None
         video_number = -1
-        for image_number, filename in enumerate(os.listdir(input_dir)):
+        image_number = 0
+        for filename in os.listdir(input_dir):
             file_path = os.path.join(input_dir, filename)
             video_identifier = '_'.join(filename.split('_')[:-1])
             if video_identifier not in test_dataset:
@@ -58,6 +59,7 @@ def encode_and_send(input_dir, model, host, port, device):
             if video_identifier != last_video_identifier:
                 video_number += 1
                 last_video_identifier = video_identifier
+                image_number = 0 # reset image number for new video
 
             image = Image.open(file_path).convert("RGB")
             image_tensor = transforms.ToTensor()(image).unsqueeze(0).to(device)  # Add batch dimension and move to device
@@ -82,6 +84,8 @@ def encode_and_send(input_dir, model, host, port, device):
                 
                 # Send metadata and feature bytes
                 sock.sendall(metadata_bytes + feature_bytes)
+            
+            image_number += 1
     finally:
         sock.close()
 
