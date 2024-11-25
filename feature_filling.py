@@ -1,11 +1,9 @@
 import os
 import numpy as np
-from collections import defaultdict
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, Subset
-from torchvision import transforms
 
 class CustomDataset(Dataset):
     def __init__(self, directory, feature_num):
