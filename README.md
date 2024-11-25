@@ -11,12 +11,12 @@
 #### Sender + Receiver Test & Simulation
 - **Run receiver first!** via (below is example, change args as necessary)
 ```
-python receiver_decode.py --model_path="PNC_final_no_dropouts.pth" --host=127.0.0.1 --port=8080
+python receiver_decode.py --model_path="PNC_final_w_random_drops.pth" --host=127.0.0.1 --port=8080
 ```
 and wait till it says "Listening on ..."
 - Then run sender (below is example, change args as necessary):
 ```
-python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --model_path="PNC_final_no_dropouts.pth" --host=127.0.0.1 --port=8080
+python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --model_path="PNC_final_w_random_drops.pth" --host=127.0.0.1 --port=8080
 ```
 
 #### Team: John Li, AJ Grama, Wenjie Guo
