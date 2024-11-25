@@ -268,6 +268,7 @@ def train_combined_model(model, train_loader, val_loader, test_loader, criterion
         # Train the model
         model.train()
         train_loss = 0
+        cnt = 1
         for inputs, targets, _ in train_loader:
             inputs, targets = inputs.to(device), targets.to(device)
 
@@ -288,6 +289,8 @@ def train_combined_model(model, train_loader, val_loader, test_loader, criterion
             optimizer.step()
 
             train_loss += loss.item() * inputs.size(0)
+            print(cnt)
+            cnt += 1
 
         train_loss /= len(train_loader.dataset)
 
