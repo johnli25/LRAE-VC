@@ -36,9 +36,11 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 - [ ] EXPERIMENT TASK: Create and implement sender_encode.py to send data back and forth btwn sender and receiver for LRAE-VC (no drops/misses)
 - [ ] EXPERIMENT TASK: Send data back and forth btwn sender and receiver for PNC (**WITH** random packet drops + deadline messes. We can just manually drop them from the sender if you wanna "cheat" instead of setting up any actual networking LOL. 
 - [ ] EXPERIMENT TASK: Same thing as above but for LRAE-VC (MAKE SURE TO USE LSTM-BASED FEATURE FILLING MODEL!)
+- [ ] Use FFmpeg to convert videos in test dataset into actual .mp4 videos and run experiments 
 - [ ] Start creating slides and writing final report 
 
 ### Notes + Other References:
 - Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
 
 ### Dev Log
+- NOTE: If you run `python autoencoder_train.py --model="PNC_NoTail"` any `max_tail_len`, `tail_length`, and related vars will be technically misleading. I didn't feel like updating the variable names in the code b/c lazy 😆, but functionally, PNC_NoTail should be fine.
