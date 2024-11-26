@@ -308,7 +308,7 @@ if __name__ == "__main__":
         model = PNC_Autoencoder_NoTail().to(device)
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, None) # NOTE: set random_drop to False to disable stochastic interspersed dropouts or True to enable stochastic interspersed dropouts
+        train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, True) # NOTE: set random_drop to False to disable stochastic interspersed dropouts or True to enable stochastic interspersed dropouts
 
     if args.model == "LRAE_VC":
         model = Compact_LRAE_VC_Autoencoder().to(device)

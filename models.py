@@ -104,9 +104,9 @@ class PNC_Autoencoder_NoTail(nn.Module):
         x1 = self.relu(self.encoder1(x))  # (3, 224, 224) -> (16, 32, 32)
         x2 = self.relu(self.encoder2(x1))  # (16, 32, 32) -> (10, 32, 32)
 
-        if random_drop: 
-            print("hit")
-            # Zero out tail features for all samples in the batch
+        if random_drop is not None: 
+            # print("PNC_NoTail hit")
+            # Zero out random interspersed features for all samples in the batch
             batch_size, channels, _, _ = x2.size()
             random_tail_length = random.randint(0, 9)
             tail_start = channels - random_tail_length
