@@ -110,36 +110,52 @@ optimizer = optim.Adam(model.parameters(), lr=0.001)
 num_epochs = 10
 
 # 准确率计算函数
-def calculate_accuracy(loader, model):
+def calculate_accuracy(loader, model, dataset, classes, is_testing=False):
     model.eval()
     correct = 0
     total = 0
+    original_dataset = dataset.dataset if hasattr(dataset, "dataset") else dataset  # Handle Subset or Dataset
     with torch.no_grad():
-        for images, labels in loader:
-            images, labels = images.to(device), labels.to(device)  # 数据移动到 GPU
+        for batch_idx, (images, labels) in enumerate(loader):
+            images, labels = images.to(device), labels.to(device)  # Move data to GPU
             outputs = model(images)
             _, predicted = torch.max(outputs, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
+            
+            if is_testing:
+                # Print filename, predicted label, and ground truth label
+                for i in range(images.size(0)):
+                    global_idx = (
+                        dataset.indices[batch_idx * loader.batch_size + i]
+                        if hasattr(dataset, "indices") else batch_idx * loader.batch_size + i
+                    )  # Map to original dataset index if using Subset
+                    img_name = original_dataset.img_names[global_idx]
+                    predicted_label = classes[predicted[i].item()]
+                    groundtruth_label = classes[labels[i].item()]
+                    print(f"Filename: {img_name}, Predicted: {predicted_label}, Ground Truth: {groundtruth_label}")
+    
     return 100 * correct / total
 
-# 训练和验证
+
+
+# Training and validation
 for epoch in range(num_epochs):
     model.train()
     for images, labels in train_loader:
-        images, labels = images.to(device), labels.to(device)  # 数据移动到 GPU
+        images, labels = images.to(device), labels.to(device)  # Move data to GPU
         outputs = model(images)
         loss = criterion(outputs, labels)
 
-        # 反向传播和优化
+        # Backpropagation and optimization
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-    # 验证集准确率
-    val_accuracy = calculate_accuracy(val_loader, model)
+    # Validation accuracy
+    val_accuracy = calculate_accuracy(val_loader, model, val_dataset, classes)
     print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}, Validation Accuracy: {val_accuracy:.2f}%")
 
-# 测试集准确率
-test_accuracy = calculate_accuracy(test_loader, model)
+# Test accuracy
+test_accuracy = calculate_accuracy(test_loader, model, test_dataset, classes, is_testing=True)
 print(f"Test Accuracy: {test_accuracy:.2f}%")
