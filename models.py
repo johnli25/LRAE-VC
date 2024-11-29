@@ -403,4 +403,33 @@ class LRAE_VC_Autoencoder_John(nn.Module):
         y = self.decode(x)
         return y
 
-    
+class FrameSequenceLSTM(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super(FrameSequenceLSTM, self).__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        
+        # LSTM
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        
+        # Fully connected layer to project hidden state to output
+        self.fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        # Reshape input from [batch_size, sequence_length, 32, 32] -> [batch_size, sequence_length, 1024]
+        batch_size, sequence_length, height, width = x.shape
+        x = x.view(batch_size, sequence_length, -1)
+        
+        # Initialize LSTM hidden and cell states
+        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(x.device)
+        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(x.device)
+        
+        # LSTM forward pass
+        lstm_out, _ = self.lstm(x, (h0, c0))
+        
+        # Apply fully connected layer to each timestep
+        output = self.fc(lstm_out)
+        
+        # Reshape output back to [batch_size, sequence_length, 32, 32]
+        output = output.view(batch_size, sequence_length, height, width)
+        return output
