@@ -67,8 +67,8 @@ def encode_and_send(input_dir, model, host, port, device):
             with torch.no_grad():
                 encoded_features = model.encode(image_tensor)  # shape = (1, 10, 32, 32)
             for feature_num in range(encoded_features.shape[1]): # encoded_features.shape[1] = number of features in model
-                if random.random() <= 0.25: # NOTE: 20% chance of feature/packet drop/loss, uncommented this
-                    print("Dropping packet for filename, video_number, image_number, feature_num:", filename, video_number, image_number, feature_num)
+                if random.random() <= 0.14: # NOTE: 20% chance of feature/packet drop/loss, uncommented this
+                    # print("Dropping packet for filename, video_number, image_number, feature_num:", filename, video_number, image_number, feature_num)
                     continue
                 # Extract the specific feature
                 feature = encoded_features[0, feature_num, :, :].cpu()  # shape = (1, 32, 32)

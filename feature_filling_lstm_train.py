@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader, Subset
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from models import FrameSequenceLSTM
 
 class CustomDataset(Dataset):
     def __init__(self, directory, feature_num):
@@ -38,48 +39,7 @@ class CustomDataset(Dataset):
         
         # Convert to a torch tensor
         return torch.tensor(sequence_item, dtype=torch.float32)
-
-class FrameSequenceLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
-        super(FrameSequenceLSTM, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        
-        # LSTM
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
-        
-        # Fully connected layer to project hidden state to output
-        self.fc = nn.Linear(hidden_dim, output_dim)
-
-    def forward(self, x):
-        """
-        Forward pass of the LSTM model.
-        Args:
-            x (torch.Tensor): Input tensor of shape [batch_size, sequence_length, 32, 32].
-
-        Returns:
-            torch.Tensor: Output tensor of the same shape as input.
-        """
-        # Reshape input from [batch_size, sequence_length, 32, 32] -> [batch_size, sequence_length, 1024]
-        batch_size, sequence_length, height, width = x.shape
-        x = x.view(batch_size, sequence_length, -1)  # Flatten spatial dimensions
-        
-        # Initialize LSTM hidden and cell states
-        h0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(x.device)
-        c0 = torch.zeros(self.num_layers, batch_size, self.hidden_dim).to(x.device)
-        print("h0 and c0 shape: ", h0.shape, c0.shape)
-        
-        # LSTM forward pass
-        lstm_out, _ = self.lstm(x, (h0, c0))
-        print("lstm_out shape: ", lstm_out.shape)
-        
-        # Apply fully connected layer to each timestep
-        output = self.fc(lstm_out)
-        
-        # Reshape output back to [batch_size, sequence_length, 32, 32]
-        output = output.view(batch_size, sequence_length, height, width)
-        print("output shape: ", output.shape)
-        return output
+    
 
 def train_model(model, dataloader, criterion, optimizer, device):
     """
@@ -95,9 +55,9 @@ def train_model(model, dataloader, criterion, optimizer, device):
         if features.shape[1] < 2:  # If the video consists of a single frame
             num_zeroes = 0
         elif features.shape[1] < 10:  # Zero out fewer frames for smaller videos
-            num_zeroes = 1
+            num_zeroes = int(np.random.uniform(0, 0.4) * features.shape[1])
         else:
-            num_zeroes = np.random.randint(1, 6)  # Randomly drop up to 5 frames
+            num_zeroes = int(np.random.uniform(0, 0.3) * features.shape[1])
 
         # Randomly set some frames to 0 for the input
         features = features.clone()  # Avoid in-place modification of the tensor
@@ -106,7 +66,6 @@ def train_model(model, dataloader, criterion, optimizer, device):
             features[:, random_idx] = 0  # Set the frame to zeros
         
         # Forward pass
-        print("in train_model(): ", features.shape)
         output_seq = model(features)
         loss = criterion(output_seq, target)
         optimizer.zero_grad()
@@ -116,6 +75,61 @@ def train_model(model, dataloader, criterion, optimizer, device):
         epoch_loss += loss.item()
     
     return epoch_loss / len(dataloader)
+
+
+def train_model_with_mask(model, dataloader, criterion, optimizer, device):
+    model.train()
+    epoch_loss = 0
+    for batch_idx, features in enumerate(dataloader):
+        features = features.to(device)
+        target = features.clone()  # Clone the target to avoid accidental modification
+
+        # Determine which frames to zero out based on drop_probability
+        sequence_length = features.shape[1]
+        if sequence_length < 2:
+            drop_probability = 0.0  # Don't drop/mask anything
+        elif sequence_length < 10:
+            drop_probability = 0.15  # Drop up to 15%
+        else:
+            drop_probability = 0.25  # Drop 25%
+        mask = torch.rand(sequence_length, device=device) < drop_probability  # Shape: [sequence_length]
+        
+        if mask.sum() == 0:
+            # If no frames are dropped, skip this batch
+            continue
+        
+        # Expand mask to match the feature dimensions
+        mask_expanded = mask.unsqueeze(-1).unsqueeze(-1).expand_as(features)  # Shape: [batch_size, sequence_length, 32, 32]
+        
+        # Zero out the selected frames in the input
+        input_features = features.clone()
+        input_features[mask_expanded] = 0  # Set the zeroed frames to zero
+
+        # Forward pass
+        output_seq = model(input_features)
+
+        # Compute loss only on zeroed-out frames
+        # Use 'reduction="none"' to compute element-wise loss
+        loss = criterion(output_seq, target)  # Shape: [batch_size, sequence_length, 32, 32]
+        
+        # Apply the mask to the loss
+        masked_loss = loss * mask_expanded.float()  # Only keep loss for zeroed frames
+        
+        # Compute the mean loss over the number of zeroed frames
+        loss_value = masked_loss.sum() / mask_expanded.float().sum()
+        
+        # Backward pass and optimization
+        optimizer.zero_grad()
+        loss_value.backward()
+        optimizer.step()
+
+        # Accumulate loss
+        epoch_loss += loss_value.item()
+    
+    # Compute average loss over all batches
+    average_loss = epoch_loss / len(dataloader)
+    return average_loss
+
 
 def evaluate_model(model, dataloader, criterion, device):
     """
@@ -131,6 +145,31 @@ def evaluate_model(model, dataloader, criterion, device):
             loss = criterion(output_seq, target)
             epoch_loss += loss.item()
     return epoch_loss / len(dataloader)
+
+
+def evaluate_model_with_mask(model, dataloader, criterion, device):
+    """
+    Evaluate the model on validation or test set.
+    """
+    model.eval()
+    epoch_loss = 0
+    total_elements = 0
+    with torch.no_grad():
+        for features in dataloader:
+            features = features.to(device)
+            target = features.clone()
+            output_seq = model(features)
+            loss = criterion(output_seq, target)  # Shape: [batch_size, ...]
+            
+            # Aggregate the loss manually
+            batch_loss = loss.sum()  # Sum all elements in the loss tensor
+            epoch_loss += batch_loss.item()
+            
+            # Keep track of the total number of elements
+            total_elements += loss.numel()
+    return epoch_loss / total_elements  # Mean loss
+
+
 
 # Configuration
 epochs = 60
@@ -149,7 +188,8 @@ for i in range(num_features):
     # TRAINING FOR FEATURE INDEX i
     print(f"Training for Feature {i}")
     model = FrameSequenceLSTM(input_dim, hidden_dim, output_dim, num_layers).to(device)
-    criterion = nn.MSELoss()
+    # criterion = nn.MSELoss() # NOTE: to use train_model()
+    criterion = nn.MSELoss(reduction='none') # NOTE: to use train_mode_with_mask()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     dataset = CustomDataset(folder_path, i)
     
@@ -176,11 +216,13 @@ for i in range(num_features):
 
     for epoch in range(epochs):
         # TRAINING PHASE
-        train_loss = train_model(model, train_dataloader, criterion, optimizer, device)
+        # train_loss = train_model(model, train_dataloader, criterion, optimizer, device) # NOTE: to use train_model()
+        train_loss = train_model_with_mask(model, train_dataloader, criterion, optimizer, device) # NOTE: to use train_model_with_mask()
         print(f"[Feature {i}] Epoch {epoch}, Training Loss: {train_loss:.4f}")
         
         # VALIDATION PHASE
-        val_loss = evaluate_model(model, val_dataloader, criterion, device)
+        # val_loss = evaluate_model(model, val_dataloader, criterion, device)
+        val_loss = evaluate_model_with_mask(model, val_dataloader, criterion, device)
         print(f"[Feature {i}] Epoch {epoch}, Validation Loss: {val_loss:.4f}")
         
         # Save the best model based on validation loss
@@ -190,7 +232,8 @@ for i in range(num_features):
             torch.save(model.state_dict(), f"feature_{i}_best_validation.pth")
 
     # TESTING PHASE
-    test_loss = evaluate_model(model, test_dataloader, criterion, device)
+    # test_loss = evaluate_model(model, test_dataloader, criterion, device)
+    test_loss = evaluate_model_with_mask(model, test_dataloader, criterion, device)
     print(f"[Feature {i}] Final Test Loss: {test_loss:.4f}")
 
     # Save the final model after training
