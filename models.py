@@ -296,112 +296,29 @@ class Compact_LRAE_VC_Autoencoder(nn.Module):
         self.dropout = nn.Dropout(0.3)
         self.sigmoid = nn.Sigmoid()
 
-
-    def forward(self, x):
-        # Encoder
+    def encode(self, x):
         x1 = self.encoder1(x)  # (32, 112, 112)
         x2 = self.encoder2(x1)  # (64, 56, 56)
         x3 = self.encoder3(x2)  # (128, 28, 28)
         x4 = self.encoder4(x3)  # (64, 14, 14)
+        return x4
 
-        # Decoder
-        y1 = self.decoder1(x4)  # (128, 28, 28)
-        y1 = y1 + x3  # Skip connection
-
-        y2 = self.decoder2(y1)  # (64, 56, 56)
-        y2 = y2 + x2  # Skip connection
-
-        y3 = self.decoder3(y2)  # (32, 112, 112)
-        y3 = y3 + x1  # Skip connection
-
-        y4 = self.decoder4(y3)  # (16, 224, 224)
+    def decode(self, latent):
+        y1 = self.decoder1(latent)  # (128, 28, 28)
+        y2 = self.decoder2(y1)      # (64, 56, 56)
+        y3 = self.decoder3(y2)      # (32, 112, 112)
+        y4 = self.decoder4(y3)      # (16, 224, 224)
 
         y5 = self.final_layer(self.dropout(y4))  # (3, 224, 224)
         y6 = self.sigmoid(y5)  # Normalize output to [0, 1]
         return y6
 
+    def forward(self, x):
+        latent = self.encode(x)
+        reconstructed = self.decode(latent)
+        return reconstructed
 
 
-class LRAE_VC_Autoencoder_John(nn.Module):
-    def __init__(self):
-        super(Compact_LRAE_VC_Autoencoder, self).__init__()
-
-        # Encoder: 3 layers
-        self.encoder1 = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=7, stride=2, padding=3),  # (3, 224, 224) -> (32, 112, 112)
-            nn.BatchNorm2d(32),
-            nn.ReLU()
-        )
-        self.encoder2 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2),  # (32, 112, 112) -> (64, 56, 56)
-            nn.BatchNorm2d(64),
-            nn.ReLU()
-        )
-        self.encoder3 = nn.Sequential(
-            nn.Conv2d(64, 12, kernel_size=3, stride=2, padding=1),  # (64, 56, 56) -> (12, 30, 30)
-            nn.BatchNorm2d(12),
-            nn.ReLU()
-        )
-
-        # Decoder: 5 layers
-        self.decoder1 = nn.Sequential(
-            nn.ConvTranspose2d(12, 64, kernel_size=4, stride=2, padding=1),  # (12, 30, 30) -> (64, 60, 60)
-            nn.BatchNorm2d(64),
-            nn.ReLU()
-        )
-        self.decoder2 = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),  # (64, 60, 60) -> (32, 120, 120)
-            nn.BatchNorm2d(32),
-            nn.ReLU()
-        )
-        self.decoder3 = nn.Sequential(
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),  # (32, 120, 120) -> (32, 120, 120)
-            nn.BatchNorm2d(32),
-            nn.ReLU()
-        )
-        self.decoder4 = nn.Sequential(
-            nn.ConvTranspose2d(32, 16, kernel_size=4, stride=2, padding=1),  # (32, 120, 120) -> (16, 240, 240)
-            nn.BatchNorm2d(16),
-            nn.ReLU()
-        )
-        self.decoder5 = nn.Sequential(
-            nn.Conv2d(16, 3, kernel_size=3, stride=1, padding=1),  # (16, 240, 240) -> (3, 240, 240)
-        )
-
-        # Activation for final output
-        self.sigmoid = nn.Sigmoid()
-
-    def encode(self, x):
-        """Perform encoding only."""
-        x = self.encoder1(x)  # (3, 224, 224) -> (32, 112, 112)
-        x = self.encoder2(x)  # (32, 112, 112) -> (64, 56, 56)
-        x = self.encoder3(x)  # (64, 56, 56) -> (12, 30, 30)
-        return x
-
-    def decode(self, x):
-        """Perform decoding only."""
-        y1 = self.decoder1(x)  # (12, 30, 30) -> (64, 60, 60)
-        y2 = self.decoder2(y1)  # (64, 60, 60) -> (32, 120, 120)
-        y3 = self.decoder3(y2) + y2  # Skip connection within Decoder (32, 120, 120)
-        y4 = self.decoder4(y3)  # (32, 120, 120) -> (16, 240, 240)
-        y5 = self.decoder5(y4)  # (16, 240, 240) -> (3, 240, 240)
-        y6 = self.sigmoid(y5)  # Normalize output to [0, 1]
-        return y6
-
-    def forward(self, x, random_drop=None):
-        # Encoder
-        x = self.encode(x)
-
-        if random_drop:
-            # Randomly drop tail channels
-            random_tail_length = random.randint(0, 11)
-            x = x.clone()  # Avoid in-place modification
-            if random_tail_length > 0:
-                x[:, -random_tail_length:, :, :] = 0
-
-        # Decoder with localized skip connections
-        y = self.decode(x)
-        return y
 
 class FrameSequenceLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers):

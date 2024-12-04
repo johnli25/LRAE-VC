@@ -125,6 +125,20 @@ def decode_full_frame_and_save_all(model, output_dir, device):
         print(f"Saved decoded full frame to {output_path}")
 
 
+def print_frameID_to_latent_encodings(output_file):
+    with open(output_file, 'w') as f:
+        for (video_number, image_number), latent_encodings in frameID_to_latent_encodings.items():
+            if video_number == 0:
+                f.write(f"Video {video_number}, Image {image_number}:\n")
+                for i in range(latent_encodings.shape[0]):
+                    f.write(f"  Index {i}:\n")
+                    f.write("  [\n")
+                    for row in latent_encodings[i]:
+                        f.write("    " + np.array2string(row, formatter={'float_kind':lambda x: '%.3f' % x}) + "\n")
+                    f.write("  ]\n")
+                f.write("\n")
+
+
 if __name__ == "__main__":
     # Hyperparameters
     input_dim = 32 * 32  # Flattened frame size (idk if this is 32x32 or 28x28)
@@ -150,8 +164,11 @@ if __name__ == "__main__":
     
     try:
         decode_and_store(conn)
-        feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
-        decode_full_frame_and_save_all(model, output_dir="received_and_decoded_frames_filled/", device=device)
+        # feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
+        decode_full_frame_and_save_all(model, output_dir="received_and_decoded_frames_not_filled/", device=device)
     finally:
         conn.close()
         server_socket.close()
+
+
+    print_frameID_to_latent_encodings("frameID_to_latent_encodings.txt")

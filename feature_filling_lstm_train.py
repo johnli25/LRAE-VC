@@ -233,7 +233,7 @@ for i in range(num_features):
 
     # TESTING PHASE
     # test_loss = evaluate_model(model, test_dataloader, criterion, device)
-    test_loss = evaluate_model_with_mask(model, test_dataloader, criterion, device)
+    test_loss = evaluate_model_with_mask(model, val_dataloader, criterion, device)
     print(f"[Feature {i}] Final Test Loss: {test_loss:.4f}")
 
     # Save the final model after training

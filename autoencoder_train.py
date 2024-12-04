@@ -8,8 +8,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import (PNC_Autoencoder, PNC_Autoencoder_with_Classification,PNC_Autoencoder_NoTail,
-                     LRAE_VC_Autoencoder, Compact_LRAE_VC_Autoencoder, LRAE_VC_Autoencoder_John)
+from models import (PNC_Autoencoder, PNC_Autoencoder_with_Classification, PNC_Autoencoder_NoTail,
+                     LRAE_VC_Autoencoder, Compact_LRAE_VC_Autoencoder)
 
 
 # Dataset class for loading images and ground truths
