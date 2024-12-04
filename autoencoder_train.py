@@ -8,8 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import (PNC_Autoencoder, PNC_Autoencoder_with_Classification, PNC_Autoencoder_NoTail,
-                     LRAE_VC_Autoencoder, Compact_LRAE_VC_Autoencoder)
+from models import (PNC_Autoencoder, PNC_Autoencoder_NoTail, LRAE_VC_Autoencoder)
 
 
 # Dataset class for loading images and ground truths
@@ -314,10 +313,10 @@ if __name__ == "__main__":
         train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, True) # NOTE: set random_drop to False to disable stochastic interspersed dropouts or True to enable stochastic interspersed dropouts
 
     if args.model == "LRAE_VC":
-        model = Compact_LRAE_VC_Autoencoder().to(device)
+        model = LRAE_VC_Autoencoder().to(device)
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model)
+        train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, None)
     
     if args.model == "PNC_with_classification":
         model = PNC_Autoencoder_with_Classification().to(device)
