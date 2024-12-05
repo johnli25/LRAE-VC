@@ -5,7 +5,7 @@ import socket
 from torchvision import transforms
 from PIL import Image
 import struct
-from models import PNC_Autoencoder, PNC_Autoencoder_with_Classification, LRAE_VC_Autoencoder, Compact_LRAE_VC_Autoencoder
+from models import PNC_Autoencoder, LRAE_VC_Autoencoder
 import random
 
 def parse_args():
@@ -38,6 +38,8 @@ def load_model(model_path, device):
 
 def encode_and_send(input_dir, model, host, port, device):
     """Encode images from the input directory and send them over the network."""
+    random.seed(42)
+    
     # Prepare socket connection
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((host, port))

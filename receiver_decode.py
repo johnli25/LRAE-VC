@@ -6,7 +6,7 @@ import struct
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import defaultdict
-from models import PNC_Autoencoder, PNC_Autoencoder_with_Classification, LRAE_VC_Autoencoder, Compact_LRAE_VC_Autoencoder, FrameSequenceLSTM
+from models import PNC_Autoencoder, LRAE_VC_Autoencoder, FrameSequenceLSTM
 
 frameID_to_latent_encodings = defaultdict(lambda: np.zeros((10, 32, 32), dtype=np.float32))
 
@@ -165,8 +165,8 @@ if __name__ == "__main__":
     
     try:
         decode_and_store(conn)
-        # feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
-        decode_full_frame_and_save_all(model, output_dir="received_and_decoded_frames_not_filled/", device=device)
+        feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
+        decode_full_frame_and_save_all(model, output_dir="received_and_decoded_frames_filled/", device=device)
     finally:
         conn.close()
         server_socket.close()

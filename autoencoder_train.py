@@ -91,7 +91,7 @@ def test_autoencoder(model, dataloader, criterion, device, max_tail_length):
     test_loss = 0
     with torch.no_grad():
         for inputs, targets, _ in dataloader:
-            torch.manual_seed(seed=41)
+            torch.manual_seed(seed=42)
             tail_len = torch.randint(0, max_tail_length + 1, (1,)).item() if max_tail_length else None
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs, tail_len) 
