@@ -136,6 +136,6 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     # Save encoder features for test set
-    # features_output_dir = "PNC_encoder_features/"
+    # features_output_dir = "PNC_encoder_features_with_drops/"
     combined_features_folder = "PNC_combined_features/"
     process_and_save_features(model, data_loader, combined_features_folder, device)
