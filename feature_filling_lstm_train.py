@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from models import FrameSequenceLSTM
+import argparse
 
 class CustomDataset(Dataset):
     def __init__(self, directory, feature_num):
@@ -99,7 +100,7 @@ def train_model_with_mask(model, dataloader, criterion, optimizer, device):
             continue
         
         # Expand mask to match the feature dimensions
-        mask_expanded = mask.unsqueeze(-1).unsqueeze(-1).expand_as(features)  # Shape: [batch_size, sequence_length, 32, 32]
+        mask_expanded = mask.unsqueeze(-1).unsqueeze(-1).expand_as(features)  # Shape: [batch_size, sequence_length, 32, 32] (Depends on model)
         
         # Zero out the selected frames in the input
         input_features = features.clone()
@@ -170,17 +171,36 @@ def evaluate_model_with_mask(model, dataloader, criterion, device):
     return epoch_loss / total_elements  # Mean loss
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Get features of desired model")
+    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_NoTail", "LRAE_VC"], 
+                        help="Model to train")
+    return parser.parse_args()
 
+args = parse_args()
 # Configuration
 epochs = 60
-folder_path = "PNC_combined_features"
+if args.model == "PNC":
+    input_dim = 32 * 32
+    output_dim = 32 * 32
+    num_features = 10    
+    folder_path = "PNC_combined_features"
+if args.model == "LRAE_VC":
+    input_dim = 28 * 28
+    output_dim = 28 * 28
+    num_features = 16    
+    folder_path = "LRAE_VC_combined_features"
+if args.model == "PNC_NoTail": # unsure if this is necessary or we just needthe first two
+    input_dim = 32 * 32
+    output_dim = 32 * 32
+    num_features = 10    
+    folder_path = "PNC_NoTail_combined_features"
+
 batch_size = 1
-input_dim = 32 * 32  # Flattened frame size
 hidden_dim = 128  # Tuned hyperparameter for LSTM
-output_dim = 32 * 32  # Same as input_dim for reconstruction
 num_layers = 2
 learning_rate = 0.001
-num_features = 10  # Number of latent features to train on
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(device)
 
