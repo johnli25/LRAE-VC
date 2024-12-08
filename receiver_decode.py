@@ -6,7 +6,7 @@ import struct
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import defaultdict
-from models import PNC_Autoencoder, PNC_Autoencoder_with_Classification, LRAE_VC_Autoencoder, Compact_LRAE_VC_Autoencoder, FrameSequenceLSTM
+from models import PNC_Autoencoder, LRAE_VC_Autoencoder, FrameSequenceLSTM
 
 frameID_to_latent_encodings = defaultdict(lambda: np.zeros((10, 32, 32), dtype=np.float32))
 
@@ -67,6 +67,7 @@ def decode_and_store(conn):
             print(f"Error during decoding or storing: {e}")
             break
 
+
 # AJ FILLS THIS IN... Need to fill in missing features in the dictionary using the corresponding LSTM model
 def feature_filler(device, input_dim, hidden_dim, output_dim, num_layers):
     video_tensors = {}
@@ -99,37 +100,6 @@ def feature_filler(device, input_dim, hidden_dim, output_dim, num_layers):
                     #.cpu() and .detach() methods required for converting tensor to np array after gpu processing
                     frameID_to_latent_encodings[(video_number, frame_num)][feature_num, :, :] = outputted_sequence[0][frame_num].cpu().detach()
                     
-        
-        """ # Save to a file (DELETE THIS WHEN DONE TESTING)
-        filename = os.path.join(output_dir, f'video_{video_number}.pt')
-        torch.save(video_tensor, filename)
-        print(f"Saved video {video_number} to {filename}")
-
-def feature_filler_test(device, input_dim, hidden_dim, output_dim, num_layers):
-    for i in range(18):
-        filename = os.path.join("sent_videos", f'video_{i}.pt')
-        video_tensor = torch.load(filename).to(device)  # This will be of shape (X, 10, 32, 32)... i think
-        video_tensor = video_tensor.transpose(0, 1) # Now (10, X, 32, 32)
-
-        for feature_num in range(video_tensor.shape[0]):
-            for frame_num in range(video_tensor.shape[1]):
-                if torch.all(video_tensor[feature_num][frame_num] == 0):
-                    print("ALL ZEROES FOUND")
-                    print("Video: " + str(i) + " Image: " + str(frame_num) + " Feature: " + str(feature_num))
-                    # Fill in item if all zeroes detected
-                    model = FrameSequenceLSTM(input_dim, hidden_dim, output_dim, num_layers)
-                    model.load_state_dict(torch.load(f"feature_{feature_num}_final.pth", map_location=device))
-                    model.to(device)
-                    model.eval()  # Set the model to evaluation mode
-                    outputted_sequence = model(video_tensor[feature_num].unsqueeze(0)) # Requires (1, X, 32, 32), so i Unsqueeze, output is same size
-                    #.cpu() and .detach() methods required for converting tensor to np array after gpu processing
-                    frameID_to_latent_encodings[(i, frame_num)][feature_num, :, :] = outputted_sequence[0][frame_num].cpu().detach()
-                    
-
-
-
-        # HERE ON CAN BE PASED INTO FEATURE_FILLER , REMEMBER POPULATE DICTIONARY VIDEO BY VIDEO
- """
 
 def decode_full_frame_and_save_all(model, output_dir, device):
     """Decode the full frame from stored latent encodings and save for all video-image frames."""
@@ -154,6 +124,20 @@ def decode_full_frame_and_save_all(model, output_dir, device):
         output_path = os.path.join(output_dir, f"video_{video_number}_img_{image_number}.png")
         plt.imsave(output_path, decoded_img)
         print(f"Saved decoded full frame to {output_path}")
+
+
+def print_frameID_to_latent_encodings(output_file):
+    with open(output_file, 'w') as f:
+        for (video_number, image_number), latent_encodings in frameID_to_latent_encodings.items():
+            if video_number == 0:
+                f.write(f"Video {video_number}, Image {image_number}:\n")
+                for i in range(latent_encodings.shape[0]):
+                    f.write(f"  Index {i}:\n")
+                    f.write("  [\n")
+                    for row in latent_encodings[i]:
+                        f.write("    " + np.array2string(row, formatter={'float_kind':lambda x: '%.3f' % x}) + "\n")
+                    f.write("  ]\n")
+                f.write("\n")
 
 
 if __name__ == "__main__":
@@ -181,9 +165,11 @@ if __name__ == "__main__":
     
     try:
         decode_and_store(conn)
-        #feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # comment this to toggle feature filling vs no feature filling
-        decode_full_frame_and_save_all(model, output_dir="received_and_decoded_frames_not_filled/", device=device)
+        feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
+        decode_full_frame_and_save_all(model, output_dir="received_and_decoded_frames_filled/", device=device)
     finally:
         conn.close()
         server_socket.close()
 
+
+    print_frameID_to_latent_encodings("frameID_to_latent_encodings.txt")
