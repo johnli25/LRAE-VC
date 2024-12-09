@@ -8,8 +8,8 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from models import PNC_Autoencoder, PNC_Autoencoder_with_Classification, LRAE_VC_Autoencoder, Compact_LRAE_VC_Autoencoder
-
+from models import PNC_Autoencoder, PNC_Autoencoder_NoTail, LRAE_VC_Autoencoder
+import argparse
     
 # Dataset class for loading images and ground truths
 class ImageDataset(Dataset):
@@ -114,15 +114,30 @@ def process_and_save_features(model, dataloader, output_folder, device):
         np.save(output_file, combined_features)
         print(f"Saved combined features for prefix '{prefix}' to '{output_file}'")
 
-
+def parse_args():
+    parser = argparse.ArgumentParser(description="Get features of desired model")
+    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_NoTail", "LRAE_VC"], 
+                        help="Model to train")
+    return parser.parse_args()
 
 if __name__ == "__main__":
+    args = parse_args()
     # Load the trained model
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # COMMENT OUT THESE TWO LINES THE SECOND TIME (See Note at Bottom)
-    model = PNC_Autoencoder().to(device)
-    model.load_state_dict(torch.load("PNC_final_no_dropouts.pth")) # NOTE: Load full-features/no random drops model! 
+    if args.model == "PNC":
+        model = PNC_Autoencoder().to(device)
+        model.load_state_dict(torch.load("PNC_final_no_dropouts.pth")) # NOTE: Load full-features/no random drops model! 
+        combined_features_folder = "PNC_combined_features/"
+    if args.model == "LRAE_VC":
+        model = LRAE_VC_Autoencoder().to(device)
+        model.load_state_dict(torch.load("LRAE_VC_final_no_dropouts.pth")) # NOTE: Load full-features/no random drops model! 
+        combined_features_folder = "LRAE_VC_combined_features/"
+    if args.model == "PNC_NoTail": # unsure if this is necessary or we just needthe first two
+        model = PNC_Autoencoder_NoTail().to(device)
+        model.load_state_dict(torch.load("PNC_NoTail_final_w_random_drops")) # NOTE: Load full-features/no random drops model! 
+        combined_features_folder = "PNC_NoTail_combined_features/"
     
     img_height, img_width = 224, 224  # Dependent on autoencoder architecture
     batch_size = 32
@@ -134,7 +149,4 @@ if __name__ == "__main__":
     dataset = ImageDataset(path, path, transform=transform)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
-    # Save encoder features for test set
-    # features_output_dir = "PNC_encoder_features/"
-    combined_features_folder = "PNC_combined_features/"
     process_and_save_features(model, data_loader, combined_features_folder, device)
