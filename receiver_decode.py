@@ -8,7 +8,8 @@ import numpy as np
 from collections import defaultdict
 from models import PNC_Autoencoder, LRAE_VC_Autoencoder, FrameSequenceLSTM
 
-frameID_to_latent_encodings = defaultdict(lambda: np.zeros((10, 32, 32), dtype=np.float32))
+frameID_to_latent_encodings = None # defaultdict(lambda: np.zeros((10, 32, 32), dtype=np.float32))
+encoding_shape = None
 
 def parse_args():
     """Parse command-line arguments."""
@@ -20,17 +21,18 @@ def parse_args():
 
 
 def load_model(model_path, device):
-    """Load the appropriate model based on the model path."""
-    if "PNC" in model_path:
+    global encoding_shape, frameID_to_latent_encodings
+    if "PNC_final_w_random_drops.pth" == model_path:
         model = PNC_Autoencoder()
-    elif "PNC_with_Classification" in model_path:
-        model = PNC_Autoencoder_with_Classification()
+        encoding_shape = (10, 32, 32)
     elif "LRAE_VC" in model_path:
         model = LRAE_VC_Autoencoder()
-    elif "Compact_LRAE_VC" in model_path:
-        model = Compact_LRAE_VC_Autoencoder()
+        encoding_shape = (16, 28, 28)
     else:
         raise ValueError(f"Unknown model type in model_path: {model_path}")
+    
+    # Initialize the frameID_to_latent_encodings dictionary dynamically
+    frameID_to_latent_encodings = defaultdict(lambda: np.zeros(encoding_shape, dtype=np.float32))
     
     # Load the pre-trained weights
     model.load_state_dict(torch.load(model_path, map_location=device))
@@ -58,7 +60,7 @@ def decode_and_store(conn):
             video_number, image_number, feature_number = struct.unpack("III", metadata_bytes)
             
             # Deserialize the feature
-            feature = np.frombuffer(feature_bytes, dtype=np.float32).reshape(32, 32)
+            feature = np.frombuffer(feature_bytes, dtype=np.float32).reshape(encoding_shape[1], encoding_shape[2])
             
             # Update the latent encoding array
             frameID_to_latent_encodings[(video_number, image_number)][feature_number, :, :] = feature # assumes 1 feature per frame (no frames entirely dropped)
@@ -84,7 +86,7 @@ def feature_filler(device, input_dim, hidden_dim, output_dim, num_layers):
         video_tensor = np.stack([tensor for _, tensor in tensors])
         video_tensor = torch.tensor(video_tensor, dtype=torch.float32)
         
-        video_tensor = video_tensor.transpose(0, 1).to(device) # Now (10, X, 32, 32)
+        video_tensor = video_tensor.transpose(0, 1).to(device) # Now (10, X, 32, 32) or (16, X, 28, 28)
 
         for feature_num in range(video_tensor.shape[0]):
             for frame_num in range(video_tensor.shape[1]):

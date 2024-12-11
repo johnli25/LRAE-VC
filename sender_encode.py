@@ -21,12 +21,12 @@ def load_model(model_path, device):
     """Load the appropriate model based on the model path."""
     if "PNC" in model_path:
         model = PNC_Autoencoder()
-    elif "PNC_with_Classification" in model_path:
-        model = PNC_Autoencoder_with_Classification()
+    # elif "PNC_with_Classification" in model_path:
+    #     model = PNC_Autoencoder_with_Classification()
     elif "LRAE_VC" in model_path:
         model = LRAE_VC_Autoencoder()
-    elif "Compact_LRAE_VC" in model_path:
-        model = Compact_LRAE_VC_Autoencoder()
+    # elif "Compact_LRAE_VC" in model_path:
+    #     model = Compact_LRAE_VC_Autoencoder()
     else:
         raise ValueError(f"Unknown model type in model_path: {model_path}")
     
@@ -93,6 +93,8 @@ def encode_and_send(input_dir, model, host, port, device):
         sock.close()
 
 
+
+# NOTE: CURRENTLY UNUSED B/C WENJIE 
 def encode_and_send_w_filename(input_dir, model, host, port, device):
     """Encode images from the input directory and send them over the network."""
     # Prepare socket connection
