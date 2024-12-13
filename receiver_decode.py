@@ -22,7 +22,7 @@ def parse_args():
 
 def load_model(model_path, device):
     global encoding_shape, frameID_to_latent_encodings
-    if "PNC_final_w_random_drops.pth" == model_path:
+    if "PNC" in model_path:
         model = PNC_Autoencoder()
         encoding_shape = (10, 32, 32)
     elif "LRAE_VC" in model_path:
@@ -150,6 +150,15 @@ if __name__ == "__main__":
     num_layers = 2
 
     args = parse_args()
+
+    if "PNC" in args.model_path:
+        input_dim = 32 * 32  # Flattened frame size (idk if this is 32x32 or 28x28)
+        output_dim = 32 * 32 #(THIS AND INPUT_DIM NEED TO BE CHANGED BASED ON ARCHITECTURE)
+    elif "LRAE_VC" in args.model_path:
+        input_dim = 28 * 28  # Flattened frame size (idk if this is 32x32 or 28x28)
+        output_dim = 28 * 28 #(THIS AND INPUT_DIM NEED TO BE CHANGED BASED ON ARCHITECTURE)
+    else:
+        raise ValueError(f"Unknown model type in model_path: {args.model_path}")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("device:", device)
@@ -167,8 +176,8 @@ if __name__ == "__main__":
     
     try:
         decode_and_store(conn)
-        feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
-        decode_full_frame_and_save_all(model, output_dir="received_and_decoded_frames_filled/", device=device)
+        #feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
+        decode_full_frame_and_save_all(model, output_dir="pnc_w_dropout_received_and_decoded_frames_filled/", device=device)
     finally:
         conn.close()
         server_socket.close()
