@@ -215,8 +215,13 @@ class FrameSequenceLSTM(nn.Module):
         self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, bidirectional=self.bidirectional)
 
         # Fully connected layer to project hidden state to output
-        self.fc = nn.Linear(hidden_dim * 2, output_dim)
-
+        #self.fc = nn.Linear(hidden_dim * 2, output_dim)
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+        
     def forward(self, x):
         """
         Forward pass of the LSTM model.
