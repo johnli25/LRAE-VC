@@ -38,7 +38,7 @@ def load_model(model_path, device):
 
 def encode_and_send(input_dir, model, host, port, device):
     """Encode images from the input directory and send them over the network."""
-    random.seed(42)
+    random.seed(64)
     
     # Prepare socket connection
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -69,7 +69,7 @@ def encode_and_send(input_dir, model, host, port, device):
             with torch.no_grad():
                 encoded_features = model.encode(image_tensor)  # shape = (1, 10, 32, 32)
             for feature_num in range(encoded_features.shape[1]): # encoded_features.shape[1] = number of features in model
-                if random.random() <= 0.14: # NOTE: % chance of feature/packet drop/loss, uncommented this
+                if random.random() < 0.5: # NOTE: % chance of feature/packet drop/loss, uncommented this
                     # print("Dropping packet for filename, video_number, image_number, feature_num:", filename, video_number, image_number, feature_num)
                     continue
                 # Extract the specific feature
@@ -148,4 +148,4 @@ if __name__ == "__main__":
     print("device:", device)
     model = load_model(args.model_path, device)
     encode_and_send(args.input_dir, model, args.host, args.port, device)
-    # encode_and_send_w_filename(args.input_dir, model, args.host, args.port, device)
+    #encode_and_send_w_filename(args.input_dir, model, args.host, args.port, device)
