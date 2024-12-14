@@ -176,8 +176,8 @@ if __name__ == "__main__":
     
     try:
         decode_and_store(conn)
-        #feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
-        decode_full_frame_and_save_all(model, output_dir="aaa/", device=device)
+        feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
+        decode_full_frame_and_save_all(model, output_dir="LRAE_VC_w_dropouts_received_and_decoded_frames_filled/", device=device)
     finally:
         conn.close()
         server_socket.close()

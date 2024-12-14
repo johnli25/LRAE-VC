@@ -132,7 +132,8 @@ if __name__ == "__main__":
         combined_features_folder = "PNC_combined_features/"
     if args.model == "LRAE_VC":
         model = LRAE_VC_Autoencoder().to(device)
-        model.load_state_dict(torch.load("LRAE_VC_final_no_dropouts.pth")) # NOTE: Load full-features/no random drops model! 
+        # model.load_state_dict(torch.load("LRAE_VC_final_no_dropouts.pth")) # NOTE: Load full-features/no random drops model! 
+        model.load_state_dict(torch.load("LRAE_VC_final_w_random_drops.pth")) # NOTE: Load full-features/no random drops model!
         combined_features_folder = "LRAE_VC_combined_features/"
     if args.model == "PNC_NoTail": # unsure if this is necessary or we just needthe first two
         model = PNC_Autoencoder_NoTail().to(device)
