@@ -36,7 +36,7 @@ class ImageDataset(Dataset):
         return image, ground_truth, self.img_names[idx]
 
 
-# Testing and training
+# for PNC and tail dropouts
 def train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
@@ -102,91 +102,62 @@ def test_autoencoder(model, dataloader, criterion, device, max_tail_length):
 
 
 
-def train_combined_model(model, train_loader, val_loader, test_loader, criterion_reconstruction, criterion_classification, optimizer, device, num_epochs, model_name):
-    print(f"Training {model_name} with combined loss...")
+# for LRAE-VC and interspersed dropouts
+def train_autoencoder_LRAE(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, model_name, random_drop):
     best_val_loss = float('inf')
+    train_losses, val_losses = [], []
 
     for epoch in range(num_epochs):
         # Train the model
         model.train()
         train_loss = 0
-        cnt = 1
         for inputs, targets, _ in train_loader:
             inputs, targets = inputs.to(device), targets.to(device)
 
             optimizer.zero_grad()
-            outputs, class_scores = model(inputs)
-
-            # Reconstruction loss
-            loss_reconstruction = criterion_reconstruction(outputs, targets)
-
-            # Classification loss
-            labels = get_labels_from_filename(_)
-            labels = torch.tensor(labels).to(device)
-            loss_classification = criterion_classification(class_scores, labels)
-
-            # Combined loss
-            loss = loss_reconstruction + loss_classification
+            outputs = model(inputs, random_drop) 
+            loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
 
             train_loss += loss.item() * inputs.size(0)
-            print(cnt)
-            cnt += 1
 
         train_loss /= len(train_loader.dataset)
+        train_losses.append(train_loss)
 
         # Validate the model
-        val_loss = test_combined_model(model, val_loader, criterion_reconstruction, criterion_classification, device)
+        val_loss = test_autoencoder_LRAE(model, val_loader, criterion, device, random_drop)
+        val_losses.append(val_loss)
 
         # Save the best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), f"{model_name}_best_validation.pth")
+            if random_drop: torch.save(model.state_dict(), f"{model_name}_best_validation_w_random_drops.pth")
+            else: torch.save(model.state_dict(), f"{model_name}_best_validation_no_dropouts.pth")
             print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
-        torch.cuda.empty_cache()
+    # Final Test
+    test_loss = test_autoencoder_LRAE(model, test_loader, criterion, device, random_drop)
+    print(f"Final Test Loss: {test_loss:.4f}")
 
-    # Final Testing
-    test_loss = test_combined_model(model, test_loader, criterion_reconstruction, criterion_classification, device)
-    print(f"Final Test Loss for {model_name}: {test_loss:.4f}")
+    plot_train_val_loss(train_losses, val_losses)
 
     # Save final model
-    torch.save(model.state_dict(), f"{model_name}_final.pth")
+    if random_drop: torch.save(model.state_dict(), f"{model_name}_final_w_random_drops.pth")
+    else: torch.save(model.state_dict(), f"{model_name}_final_no_dropouts.pth")
 
-def test_combined_model(model, dataloader, criterion_reconstruction, criterion_classification, device, final_test=False):
+
+def test_autoencoder_LRAE(model, dataloader, criterion, device, random_drop):
     model.eval()
     test_loss = 0
-    all_predictions = []
-    filenames_list = []
     with torch.no_grad():
-        for inputs, targets, img_file_name in dataloader:
+        for inputs, targets, _ in dataloader:
             inputs, targets = inputs.to(device), targets.to(device)
-            outputs, class_scores = model(inputs)
-
-            # Reconstruction loss
-            loss_reconstruction = criterion_reconstruction(outputs, targets)
-
-            # Classification loss
-            labels = get_labels_from_filename(img_file_name)
-            labels = torch.tensor(labels).to(device)
-            loss_classification = criterion_classification(class_scores, labels)
-
-            # Combined loss
-            loss = loss_reconstruction + loss_classification
+            outputs = model(inputs, random_drop) 
+            loss = criterion(outputs, targets)
             test_loss += loss.item() * inputs.size(0)
-
-            # Predict class labels
-            _, predicted_labels = torch.max(class_scores, 1) # shape is (batch_size,) since it's batch_size of predictions
-            all_predictions.extend(predicted_labels.cpu().numpy()) # ... that's why use .extend() because it's a list of predictions
-            filenames_list.extend(img_file_name)
-
-    if final_test:
-        # Print predictions
-        for filename, prediction in zip(filenames_list, all_predictions):
-            print(f"Image: {filename}, Predicted Label: {prediction}")
 
     return test_loss / len(dataloader.dataset)
 
@@ -298,32 +269,18 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
 
-
     if args.model == "PNC":
         model = PNC_Autoencoder().to(device)
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         max_tail_length = 10
         train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, None) # NOTE: set tail_length to None to use the full sequence (0 features dropped) OR set tail_length=tail_length to enable stochastic tail-dropout
-        
-    if args.model == "PNC_NoTail":
-        model = PNC_Autoencoder_NoTail().to(device)
-        criterion = nn.MSELoss()
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, True) # NOTE: set random_drop to False to disable stochastic interspersed dropouts or True to enable stochastic interspersed dropouts
 
     if args.model == "LRAE_VC":
         model = LRAE_VC_Autoencoder().to(device)
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, None)
-    
-    if args.model == "PNC_with_classification":
-        model = PNC_Autoencoder_with_Classification().to(device)
-        criterion_reconstruction = nn.MSELoss()
-        criterion_classification = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        train_combined_model(model, train_loader, val_loader, test_loader, criterion_reconstruction, criterion_classification, optimizer, device, num_epochs, args.model)
+        train_autoencoder_LRAE(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, None) # I set drop probability to 0.14, but you can change it to whatever you want
 
     # Save images generated by decoder 
     output_path = "output_test_imgs_post_training/"

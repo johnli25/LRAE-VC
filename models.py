@@ -200,6 +200,15 @@ class LRAE_VC_Autoencoder(nn.Module):
 
     def forward(self, x, random_drop=None): 
         latent = self.encode(x)
+
+        if random_drop is not None:
+            print("hit LRAE_VC random_drop") 
+            mask = (torch.rand(latent.size(1)) > random_drop).float().to(latent.device)
+
+            mask = mask.view(1, -1, 1, 1)
+
+            latent = latent * mask
+
         output = self.decode(latent)
         return output
 

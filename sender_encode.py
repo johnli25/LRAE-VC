@@ -119,7 +119,7 @@ def encode_and_send_w_filename(input_dir, model, host, port, device):
             with torch.no_grad():
                 encoded_features = model.encode(image_tensor)  # shape = (1, 10, 32, 32)
             for feature_num in range(encoded_features.shape[1]): # encoded_features.shape[1] = number of features in model
-                if random.random() <= 0.14: # NOTE: % chance of feature/packet drop/loss, uncommented this
+                if random.random() <= 0.25: # NOTE: % chance of feature/packet drop/loss, uncommented this
                     # print("Dropping packet for filename, feature_num:", filename, feature_num)
                     continue
                 # Extract the specific feature
