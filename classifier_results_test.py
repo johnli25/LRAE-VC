@@ -4,6 +4,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 import torch.nn as nn
+import matplotlib.pyplot as plt
 
 classes = [
     'diving',
@@ -16,9 +17,12 @@ classes = [
     'swing_bench'
 ]
 
+# Folder categories
 folders = [
-    "path_to_folder_1",  # TODO: Replace with actual folder paths
-    "path_to_folder_2"
+    "pnc_filled_0", "pnc_filled_10", "pnc_filled_20", "pnc_filled_30", "pnc_filled_40", "pnc_filled_50",
+    "pnc_not_filled_0", "pnc_not_filled_10", "pnc_not_filled_20", "pnc_not_filled_30", "pnc_not_filled_40", "pnc_not_filled_50",
+    "lrae_filled_0", "lrae_filled_10", "lrae_filled_20", "lrae_filled_30", "lrae_filled_40", "lrae_filled_50",
+    "lrae_not_filled_0", "lrae_not_filled_10", "lrae_not_filled_20", "lrae_not_filled_30", "lrae_not_filled_40", "lrae_not_filled_50"
 ]
 
 class CustomImageDataset(Dataset):
@@ -127,9 +131,52 @@ if __name__ == "__main__":
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
     ])
 
+    # Organize results by category
+    results = {
+        "PNC_filled": {"drop_rates": [], "accuracies": []},
+        "PNC_not_filled": {"drop_rates": [], "accuracies": []},
+        "LRAE_filled": {"drop_rates": [], "accuracies": []},
+        "LRAE_not_filled": {"drop_rates": [], "accuracies": []}
+    }
+
     # Test each folder
     for folder in folders:
         dataset = CustomImageDataset(img_dir=folder, transform=transform)
         test_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
         test_accuracy = calculate_accuracy(test_dataloader, model, device)
-        print(f"Folder {folder}, Test Accuracy: {test_accuracy:.2f}%")
+
+        try: # Extract packet drop rate and category
+            drop_rate = int(folder.split('_')[-1])  # Extract the number after the last '_'
+        except ValueError:
+            print(f"Invalid folder name format: {folder}")
+            continue
+
+        if "pnc_filled" in folder:
+            category = "PNC_filled"
+        elif "pnc_not_filled" in folder:
+            category = "PNC_not_filled"
+        elif "lrae_filled" in folder:
+            category = "LRAE_filled"
+        elif "lrae_not_filled" in folder:
+            category = "LRAE_not_filled"
+        else:
+            print(f"Unknown folder category: {folder}")
+            continue
+
+        results[category]["drop_rates"].append(drop_rate)
+        results[category]["accuracies"].append(test_accuracy)
+
+        print(f"Folder {folder}, Category: {category}, Packet Drop Rate: {drop_rate}%, Test Accuracy: {test_accuracy:.2f}%")
+
+    # Plotting results
+    plt.figure(figsize=(10, 8))
+    for category, data in results.items():
+        plt.plot(data["drop_rates"], data["accuracies"], marker='o', label=category)
+
+    plt.title('Classification Accuracy vs Packet Drop Rate')
+    plt.xlabel('Packet Drop Rate (%)')
+    plt.ylabel('Classification Test Accuracy (%)')
+    plt.grid(True)
+    plt.legend()
+    plt.savefig('classification_vs_packet_droprate_for_all_4_methods.png')
+    plt.show()
