@@ -162,6 +162,53 @@ def test_autoencoder_LRAE(model, dataloader, criterion, device, random_drop):
     return test_loss / len(dataloader.dataset)
 
 
+def train_autoencoder_with_classification(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, model_name):
+    best_val_loss = float('inf')
+    train_losses, val_losses = [], []
+
+    for epoch in range(num_epochs):
+        # Train phase
+        model.train()
+        train_loss = 0
+        for inputs, labels in train_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+
+            train_loss += loss.item() * inputs.size(0)
+
+        train_loss /= len(train_loader.dataset)
+        train_losses.append(train_loss)
+
+        # Validation phase
+        val_loss = 0
+        model.eval()
+        with torch.no_grad():
+            for inputs, labels in val_loader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item() * inputs.size(0)
+
+        val_loss /= len(val_loader.dataset)
+        val_losses.append(val_loss)
+
+        print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
+
+        # Save best model
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), f"{model_name}_best_classifier.pth")
+            print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
+
+    plot_train_val_loss(train_losses, val_losses)
+
+
+
 
 def get_labels_from_filename(filenames, class_map = {
         "diving": 0, "golf_front": 1, "kick_front": 2, "lifting": 3, "riding_horse": 4,

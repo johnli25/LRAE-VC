@@ -63,6 +63,34 @@ class PNC_Autoencoder(nn.Module):
     
 
 
+class PNC_with_classification(nn.Module):
+    def __init__(self, autoencoder, num_classes):
+        super(PNC_with_classification, self).__init__()
+
+        # Use encoder from the trained autoencoder
+        self.encoder = autoencoder.encode
+
+        # Freeze encoder parameters (No updates during training)
+        for param in self.encoder.parameters():
+            param.requires_grad = False
+
+        # Add a classification head
+        self.classifier = nn.Sequential(
+            nn.Flatten(), 
+            nn.Linear(10 * 32 * 32, 256),  # Latent dimension from encoder
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(256, num_classes)
+        )
+
+    def forward(self, x):
+        with torch.no_grad():  # Freeze encoder
+            features = self.encoder(x)  # (batch, 10, 32, 32)
+        output = self.classifier(features)
+        return output
+    
+
+
 # PNC modified for random interspersed dropouts instead of tail dropouts
 class PNC_Autoencoder_NoTail(nn.Module):
     def __init__(self):
@@ -213,6 +241,7 @@ class LRAE_VC_Autoencoder(nn.Module):
         return output
 
 
+
 class FrameSequenceLSTM(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
         super(FrameSequenceLSTM, self).__init__()
@@ -257,4 +286,7 @@ class FrameSequenceLSTM(nn.Module):
         # Reshape output back to [batch_size, sequence_length, 32, 32]
         output = output.view(batch_size, sequence_length, height, width)
         return output
+    
+
+
     
