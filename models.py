@@ -68,11 +68,17 @@ class PNC_with_classification(nn.Module):
         super(PNC_with_classification, self).__init__()
 
         # Use encoder from the trained autoencoder
-        self.encoder = autoencoder.encode
+        self.encoder = nn.Sequential(
+            autoencoder.encoder1,  # (3, 224, 224) -> (16, 32, 32)
+            autoencoder.encoder2   # (16, 32, 32) -> (10, 32, 32)
+        )
 
         # Freeze encoder parameters (No updates during training)
         for param in self.encoder.parameters():
             param.requires_grad = False
+
+        # add Global Average Pooling for dimension fixing
+        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
 
         # Add a classification head
         self.classifier = nn.Sequential(

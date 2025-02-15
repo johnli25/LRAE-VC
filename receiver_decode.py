@@ -95,7 +95,7 @@ def feature_filler(device, input_dim, hidden_dim, output_dim, num_layers):
                     print("Video: " + str(video_number) + " Image: " + str(frame_num) + " Feature: " + str(feature_num))
                     # Fill in item if all zeroes detected
                     model = FrameSequenceLSTM(input_dim, hidden_dim, output_dim, num_layers)
-                    model.load_state_dict(torch.load(f"feature_{feature_num}_final.pth", map_location=device))
+                    model.load_state_dict(torch.load(f"features_num_directory/feature_{feature_num}_final.pth", map_location=device))
                     model.to(device)
                     model.eval()  # Set the model to evaluation mode
                     outputted_sequence = model(video_tensor[feature_num].unsqueeze(0)) # Requires (1, X, 32, 32), so i Unsqueeze, output is same size

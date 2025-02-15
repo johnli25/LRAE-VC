@@ -249,7 +249,7 @@ for i in range(num_features):
         if val_loss < min_val_loss:
             print("New Best Model Found! Saving...")
             min_val_loss = val_loss
-            torch.save(model.state_dict(), f"feature_{i}_best_validation.pth")
+            torch.save(model.state_dict(), f"features_num_directory/feature_{i}_best_validation.pth")
 
     # TESTING PHASE
     # test_loss = evaluate_model(model, test_dataloader, criterion, device)
@@ -257,4 +257,4 @@ for i in range(num_features):
     print(f"[Feature {i}] Final Test Loss: {test_loss:.4f}")
 
     # Save the final model after training
-    torch.save(model.state_dict(), f"feature_{i}_final.pth")
+    torch.save(model.state_dict(), f"features_num_directory/feature_{i}_final.pth")
