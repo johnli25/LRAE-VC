@@ -37,7 +37,7 @@ class ImageDataset(Dataset):
 
 
 # for PNC and tail dropouts
-def train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length):
+def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
 
@@ -103,7 +103,7 @@ def test_autoencoder(model, dataloader, criterion, device, max_tail_length):
 
 
 # for LRAE-VC and interspersed dropouts
-def train_autoencoder_LRAE(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, model_name, random_drop):
+def train_autoencoder_LRAE(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, random_drop):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
 
@@ -139,7 +139,7 @@ def train_autoencoder_LRAE(model, train_loader, val_loader, criterion, optimizer
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
     # Final Test
-    test_loss = test_autoencoder_LRAE(model, test_loader, criterion, device, random_drop)
+    test_loss = test_autoencoder_LRAE(model, train_loader, criterion, device, random_drop)
     print(f"Final Test Loss: {test_loss:.4f}")
 
     plot_train_val_loss(train_losses, val_losses)
@@ -162,7 +162,7 @@ def test_autoencoder_LRAE(model, dataloader, criterion, device, random_drop):
     return test_loss / len(dataloader.dataset)
 
 
-def train_autoencoder_with_classification(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, model_name):
+def train_autoencoder_with_classification(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
 
@@ -187,18 +187,7 @@ def train_autoencoder_with_classification(model, train_loader, val_loader, crite
         train_losses.append(train_loss)
 
         # Validation phase
-        val_loss = 0
-        model.eval()
-        with torch.no_grad():
-            for inputs, _, filenames in val_loader:
-                labels = torch.tensor(get_labels_from_filename(filenames))
-                inputs, labels = inputs.to(device), labels.to(device)
-                
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                val_loss += loss.item() * inputs.size(0)
-
-        val_loss /= len(val_loader.dataset)
+        val_loss = test_autoencoder_with_classification(model, val_loader, device)
         val_losses.append(val_loss)
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
@@ -223,11 +212,12 @@ def test_autoencoder_with_classification(model, dataloader, device):
     model.eval()
     correct, total = 0, 0
     with torch.no_grad():
-        for inputs, labels in dataloader:
+        for inputs, _, filenames in dataloader:
+            labels = torch.tensor(get_labels_from_filename(filenames))
             inputs, labels = inputs.to(device), labels.to(device)
+
             outputs = model(inputs)
             _, predicted = torch.max(outputs.data, 1)
-            print(labels.size())
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
@@ -238,7 +228,7 @@ def test_autoencoder_with_classification(model, dataloader, device):
 
 def get_labels_from_filename(filenames, class_map = {
         "diving": 0, "golf_front": 1, "kick_front": 2, "lifting": 3, "riding_horse": 4,
-        "running": 5, "skating": 6, "swing_bench": 7, "swing_side": 8, "walk_front": 9
+        "running": 5, "skating": 6, "swing_bench": 7
     }):
     labels = []
     for filename in filenames:
@@ -347,36 +337,33 @@ if __name__ == "__main__":
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         max_tail_length = 10
-        train_autoencoder(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, None) # NOTE: set tail_length to None to use the full sequence (0 features dropped) OR set tail_length=tail_length to enable stochastic tail-dropout
+        train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, None) # NOTE: set tail_length to None to use the full sequence (0 features dropped) OR set tail_length=tail_length to enable stochastic tail-dropout
 
     if args.model == "LRAE_VC":
         model = LRAE_VC_Autoencoder().to(device)
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        train_autoencoder_LRAE(model, train_loader, val_loader, criterion, optimizer, device, num_epochs, args.model, None) # I set drop probability to 0.14, but you can change it to whatever you want
+        train_autoencoder_LRAE(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, None) # I set drop probability to 0.14, but you can change it to whatever you want
 
     if args.model == "PNC_with_classification":
         # Load trained autoencoder
-        autoencoder = PNC_Autoencoder().to(device)
-        autoencoder.load_state_dict(torch.load("PNC_final_no_dropouts.pth"))
-        autoencoder.eval()
+        model_autoencoder = PNC_Autoencoder().to(device)
+        model_autoencoder.load_state_dict(torch.load("PNC_final_no_dropouts.pth"))
+        model_autoencoder.eval()
 
         # Create classifier model
-        classifier = PNC_with_classification(autoencoder, num_classes=8).to(device)
+        model_classifier = PNC_with_classification(model_autoencoder, num_classes=8).to(device)
 
         # Classification Loss and Optimizer
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(classifier.classifier.parameters(), lr=learning_rate)
-
-        # Create labeled dataset for classifier
-        classifier_train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-        classifier_val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        optimizer = optim.Adam(model_classifier.classifier.parameters(), lr=learning_rate)
 
         # Train the classifier
         train_autoencoder_with_classification(
-            model=classifier,
-            train_loader=classifier_train_loader,
-            val_loader=classifier_val_loader,
+            model=model_classifier,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            test_loader=test_loader,
             criterion=criterion,
             optimizer=optimizer,
             device=device,
@@ -394,38 +381,45 @@ if __name__ == "__main__":
         print(f"Directory already exists: {output_path}")
 
 
-    model.eval()
-    with torch.no_grad():
-        correct, total = 0, 0
+    if args.model == "PNC_with_classification":
+        # --> Encoder + Classification testing
+        model_classifier.eval()  # Put classifier in eval mode
+        model_autoencoder.eval()  # Put autoencoder in eval mode
+        with torch.no_grad():
+            correct, total = 0, 0
+            for i, (inputs, _, filenames) in enumerate(test_loader):
+                inputs = inputs.to(device)
+                outputs = model_classifier(inputs)  # Forward pass through classifier
 
-        # NOTE: this iterates over BATCHES of the test data!!!
-        for i, (inputs, _, filenames) in enumerate(test_loader):
-            inputs = inputs.to(device)
-            outputs = model(inputs)
-            if args.model == "PNC_with_classification": 
-                _, predicted = torch.max(outputs, 1) # Get class index
-            
-                # Get ground truth labels from filenames
-                ground_truth = get_labels_from_filename(filenames) 
+                _, predicted = torch.max(outputs, 1)
+
+                ground_truth = get_labels_from_filename(filenames)
                 ground_truth = torch.tensor(ground_truth).to(device)
 
-                # Print predictions line-by-line
-                for filename, pred, gt in zip(filenames, predicted.cpu().numpy(), ground_truth.cpu().numpy()):
-                    print(f"Frame: {filename}, Predicted Class: {pred}, Ground Truth: {gt}")
-                
-                # Compute accuracy
+                # Print predictions
+                # for filename, pred, gt in zip(filenames, predicted.cpu().numpy(), ground_truth.cpu().numpy()):
+                #     print(f"Frame: {filename}, Predicted Class: {pred}, Ground Truth: {gt}")
+
+                # Update accuracy
                 correct += (predicted == ground_truth).sum().item()
                 total += ground_truth.size(0)
 
-                # Print total accuracy
-                accuracy = 100 * correct / total if total > 0 else 0
-                print(f"\nTotal Correct: {correct} / {total}")
-                print(f"Classification Accuracy: {accuracy:.2f}%")
-                
-            else: 
-                for j in range(inputs.size()[0]):
-                    output = outputs[j].permute(1, 2, 0).cpu().numpy() # outputs[j] original shape is (3, 224, 224), which need to convert to -> (224, 224, 3)
-                    # output = (output * 255).astype(np.uint8)
+            # Final accuracy
+            accuracy = 100 * correct / total if total > 0 else 0
+            print(f"\nTotal Correct: {correct}/{total}")
+            print(f"Classification Accuracy: {accuracy:.2f}%")
 
-                    # save the numpy array as image
-                    plt.imsave(os.path.join(output_path, filenames[j]), output)
+    else:
+        # --> Reconstruction testing (PNC or LRAE)
+        model.eval()  # Put the autoencoder in eval mode
+        with torch.no_grad():
+            for i, (inputs, _, filenames) in enumerate(test_loader):
+                inputs = inputs.to(device)
+                outputs = model(inputs)  # Forward pass through autoencoder
+
+                # outputs is (batch_size, 3, 224, 224)
+                # Save each reconstructed image
+                for j in range(inputs.size(0)):
+                    output_np = outputs[j].permute(1, 2, 0).cpu().numpy()  # (224, 224, 3)
+                    plt.imsave(os.path.join(output_path, filenames[j]), output_np)
+

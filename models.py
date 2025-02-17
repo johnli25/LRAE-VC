@@ -77,24 +77,30 @@ class PNC_with_classification(nn.Module):
         for param in self.encoder.parameters():
             param.requires_grad = False
 
-        # add Global Average Pooling for dimension fixing
-        self.global_avg_pool = nn.AdaptiveAvgPool2d((1, 1))
+        # 1x1 Conv for cross-channel learning + GAP to reduce dimensions
+        self.feature_projection = nn.Sequential(
+            nn.Conv2d(10, 32, kernel_size=1),   # (10, 32, 32) -> (32, 32, 32)
+            nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1))        # (32, 32, 32) -> (32, 1, 1)
+        )
 
-        # Add a classification head
+        # Classifier
         self.classifier = nn.Sequential(
-            nn.Flatten(), 
-            nn.Linear(10 * 32 * 32, 256),  # Latent dimension from encoder
+            nn.Flatten(),
+            nn.Linear(32, 128),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(256, num_classes)
+            nn.Linear(128, num_classes)
         )
 
     def forward(self, x):
         with torch.no_grad():  # Freeze encoder
             features = self.encoder(x)  # (batch, 10, 32, 32)
-        output = self.classifier(features)
+
+        projected = self.feature_projection(features)  # (batch, 32, 1, 1)
+        output = self.classifier(projected)
         return output
-    
+
 
 
 # PNC modified for random interspersed dropouts instead of tail dropouts
@@ -293,6 +299,52 @@ class FrameSequenceLSTM(nn.Module):
         output = output.view(batch_size, sequence_length, height, width)
         return output
     
+
+
+class ComplexCNN(nn.Module):
+    def __init__(self, num_classes):
+        super(ComplexCNN, self).__init__()
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 112x112
+            
+            nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),  # 56x56
+            
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2)  # 28x28
+        )
+        self.fc_layers = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(256 * 28 * 28, 512),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(256, num_classes)
+        )
+    
+    def forward(self, x):
+        x = self.conv_layers(x)
+        x = self.fc_layers(x)
+        return x
+
 
 
     
