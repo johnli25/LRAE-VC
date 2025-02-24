@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import (PNC_Autoencoder, PNC_Autoencoder_NoTail, PNC_with_classification, LRAE_VC_Autoencoder)
+from models import (PNC_Autoencoder, PNC_256Unet_Autoencoder, PNC_16, TestNew, TestNew2, PNC_with_classification, LRAE_VC_Autoencoder)
 
 
 # Dataset class for loading images and ground truths
@@ -239,7 +239,7 @@ def get_labels_from_filename(filenames, class_map = {
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
-    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
+    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_256U", "PNC_16", "TestNew", "TestNew2", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
                         help="Model to train")
     return parser.parse_args()
 
@@ -265,10 +265,10 @@ if __name__ == "__main__":
     args = parse_args()
 
     ## Hyperparameters
-    num_epochs = 30
+    num_epochs = 28
     batch_size = 32
     learning_rate = 1e-3
-    img_height, img_width = 224, 224  # Dependent on autoencoder architecture
+    img_height, img_width = 224, 224  # NOTE: Dependent on autoencoder architecture!!
 
     # Data loading
     transform = transforms.Compose([
@@ -276,7 +276,7 @@ if __name__ == "__main__":
         transforms.ToTensor(),
     ])
 
-    path = "UCF_224x224x3_PNC_FrameCorr_input_imgs/"
+    path = "UCF_256x256x3_PNC_FrameCorr_input_imgs/" # NOTE: make sure to update this path to correct dataset directory
 
     dataset = ImageDataset(path, path, transform=transform)
 
@@ -337,7 +337,34 @@ if __name__ == "__main__":
         criterion = nn.MSELoss()
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         max_tail_length = 10
-        train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, None) # NOTE: set tail_length to None to use the full sequence (0 features dropped) OR set tail_length=tail_length to enable stochastic tail-dropout
+        train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, None) # NOTE: set tail_length to None to use the full sequence (0 features dropped) OR set tail_length=max_tail_length to enable stochastic tail-dropout
+
+    if args.model == "PNC_256U":
+        model = PNC_256Unet_Autoencoder().to(device)
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        max_tail_length = 256
+        train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, None)
+
+    if args.model == "PNC_16":
+        model = PNC_16().to(device)
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        max_tail_length = 16
+        train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, None)
+
+    if args.model == "TestNew":
+        model = TestNew().to(device)
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        max_tail_length = 123456789
+        train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, None)
+
+    if args.model == "TestNew2":
+        model = TestNew2().to(device)
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, None)
 
     if args.model == "LRAE_VC":
         model = LRAE_VC_Autoencoder().to(device)
@@ -416,10 +443,11 @@ if __name__ == "__main__":
             for i, (inputs, _, filenames) in enumerate(test_loader):
                 inputs = inputs.to(device)
                 outputs = model(inputs)  # Forward pass through autoencoder
+                print("Outputs shape:", outputs.shape)
 
-                # outputs is (batch_size, 3, 224, 224)
+                # outputs is (batch_size, 3, image_h, image_w)
                 # Save each reconstructed image
                 for j in range(inputs.size(0)):
-                    output_np = outputs[j].permute(1, 2, 0).cpu().numpy()  # (224, 224, 3)
+                    output_np = outputs[j].permute(1, 2, 0).cpu().numpy()  # (image_h, image_w, 3)
                     plt.imsave(os.path.join(output_path, filenames[j]), output_np)
 

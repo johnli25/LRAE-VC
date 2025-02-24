@@ -9,7 +9,7 @@ def preprocessDataset(input_path, output_path):
         if filename.endswith('.jpg'):
             img_path = os.path.join(input_path, filename)
             with Image.open(img_path) as img:
-                img = img.resize((224, 224))  # Resize to 224x224
+                img = img.resize((256, 256))  # Resize to 224x224
                 img = img.convert("RGB")  # Ensure 3 channels (RGB)
                 
                 # Save the resized image directly as uint8 JPEG
@@ -18,5 +18,5 @@ def preprocessDataset(input_path, output_path):
 
 # Usage
 input_path = 'UCF_uncompressed_video_img_frames'
-output_path = 'UCF_224x224x3_PNC_FrameCorr_input_imgs'
+output_path = 'UCF_256x256x3_PNC_FrameCorr_input_imgs'
 preprocessDataset(input_path, output_path)
