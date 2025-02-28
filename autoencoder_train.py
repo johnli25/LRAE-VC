@@ -13,9 +13,9 @@ from models import (PNC_Autoencoder, PNC_256Unet_Autoencoder, PNC_16, TestNew, T
 
 # Dataset class for loading images and ground truths
 class ImageDataset(Dataset):
-    def __init__(self, img_dir, gt_dir, transform=None):
+    def __init__(self, img_dir, transform=None):
         self.img_dir = img_dir
-        self.gt_dir = gt_dir
+        self.gt_dir = img_dir
         self.transform = transform
         self.img_names = os.listdir(img_dir)
 
@@ -278,7 +278,7 @@ if __name__ == "__main__":
 
     path = "UCF_256x256x3_PNC_FrameCorr_input_imgs/" # NOTE: make sure to update this path to correct dataset directory
 
-    dataset = ImageDataset(path, path, transform=transform)
+    dataset = ImageDataset(path, transform=transform)
 
     # Define test dataset using specified filenames
     test_img_names = {
