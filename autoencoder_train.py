@@ -276,7 +276,7 @@ if __name__ == "__main__":
         transforms.ToTensor(),
     ])
 
-    path = "UCF_256x256x3_PNC_FrameCorr_input_imgs/" # NOTE: make sure to update this path to correct dataset directory
+    path = "UCF_224x224x3_PNC_FrameCorr_input_imgs/" # NOTE: make sure to update this path to correct dataset directory
 
     dataset = ImageDataset(path, transform=transform)
 
