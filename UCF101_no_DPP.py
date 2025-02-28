@@ -81,7 +81,7 @@ def custom_collate(batch):
         filtered_batch.append((video, label))
     return torch.utils.data.dataloader.default_collate(filtered_batch)
 
-def train_cnn(model, train_loader, test_loader, device, epochs=10, lr=0.001):
+def train_cnn(model, train_loader, test_loader, device, epochs=10, lr=0.001, save_dir='./checkpoints'):
     """
     Train and evaluate a single-GPU (or CPU) model.
     """
@@ -104,6 +104,10 @@ def train_cnn(model, train_loader, test_loader, device, epochs=10, lr=0.001):
             running_loss += loss.item() * videos.size(0)
         epoch_loss = running_loss / len(train_loader.dataset)
         print(f"[CNN] Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}")
+
+        checkpoint_path = os.path.join(save_dir, f'model_epoch_{epoch+1}.pth')
+        torch.save(model.state_dict(), checkpoint_path)
+        print(f"Model saved to {checkpoint_path}")
 
 def test_cnn(model, test_loader, device):
     model.eval()
