@@ -97,7 +97,6 @@ def train_cnn(rank, world_size, model, train_loader, test_loader, epochs=10, lr=
     criterion = nn.CrossEntropyLoss().to(rank)
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
-
     start_epoch = resume_epoch
     for epoch in range(start_epoch, epochs):
         model.train()
@@ -129,11 +128,69 @@ def train_cnn(rank, world_size, model, train_loader, test_loader, epochs=10, lr=
 
     cleanup()
 
+def test_cnn(rank, world_size, model, test_loader, load_model_path=None):
+    setup(rank, world_size)
+
+    model = model.to(rank)
+    model = DDP(model, device_ids=[rank])
+
+    if load_model_path is not None and os.path.exists(load_model_path):
+        model.load_state_dict(torch.load(load_model_path, map_location=f"cuda:{rank}"))
+        print(f"[GPU {rank}] Loaded model from {load_model_path}")
+    
+    criterion = nn.CrossEntropyLoss().to(rank)    
+    # No need for an optimizer if we are just testing
+    model.eval()
+    
+    test_loader.sampler.rank = rank
+    test_loader.sampler.set_epoch(0)
+
+    running_loss = 0.0
+    correct = 0
+    total = 0
+
+    # Conditionally wrap with tqdm on rank 0:
+    if rank == 0: loop = tqdm(test_loader, desc="Testing", leave=False)
+    else: loop = test_loader
+
+    with torch.no_grad():
+        for videos, labels in loop:
+            videos = videos.to(rank)
+            labels = labels.to(rank)
+            outputs = model(videos)
+            loss = criterion(outputs, labels)
+            running_loss += loss.item() * videos.size(0)
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    # Aggregate partial results across ranks
+    loss_tensor    = torch.tensor([running_loss], device=rank, dtype=torch.float)
+    correct_tensor = torch.tensor([correct],      device=rank, dtype=torch.float)
+    total_tensor   = torch.tensor([total],        device=rank, dtype=torch.float)
+
+    dist.all_reduce(loss_tensor,    op=dist.ReduceOp.SUM)
+    dist.all_reduce(correct_tensor, op=dist.ReduceOp.SUM)
+    dist.all_reduce(total_tensor,   op=dist.ReduceOp.SUM)
+
+    global_loss    = loss_tensor.item()
+    global_correct = correct_tensor.item()
+    global_total   = total_tensor.item()
+
+    avg_loss  = global_loss / global_total
+    accuracy  = global_correct / global_total
+
+    if rank == 0:
+        print(f"[GPU {rank}] Global Test Loss: {avg_loss:.4f}, Accuracy: {accuracy:.4f}")
+
+    cleanup()
+
+
 def main():
     world_size = 2  # NOTE: john's VM have 2 GPUs. Adjust if on different hardware.
     batch_size = 32
     epochs = 10
-    resume_epoch = 9
+    resume_epoch = 10
     lr = 0.001
 
     transform = Compose([Resize((64, 64))])
@@ -175,9 +232,16 @@ def main():
 
     model = VideoCNNClassifier(num_classes=101)
 
-    mp.spawn(
+    mp.spawn( # Train
         train_cnn,
         args=(world_size, model, train_loader, test_loader, epochs, lr, './checkpoints', resume_epoch),
+        nprocs=world_size,
+        join=True
+    )
+
+    mp.spawn( # Test
+        test_cnn,
+        args=(world_size, model, test_loader, './checkpoints/model_epoch_10.pth'),
         nprocs=world_size,
         join=True
     )
