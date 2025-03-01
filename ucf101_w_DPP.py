@@ -7,10 +7,15 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 from torchvision.datasets import UCF101
 from torchvision.transforms import Compose, Resize
-import subprocess
+import torch.multiprocessing as mp
+from tqdm import tqdm
 
-os.environ["MASTER_ADDR"] = "localhost"
-os.environ["MASTER_PORT"] = "12355"
+def setup(rank, world_size):
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch.cuda.set_device(rank)
+
+def cleanup():
+    dist.destroy_process_group()
 
 class VideoTransformer(nn.Module):
     """
@@ -18,64 +23,46 @@ class VideoTransformer(nn.Module):
     """
     def __init__(self, num_classes=101, embed_dim=512, num_heads=8, num_layers=4):
         super(VideoTransformer, self).__init__()
-        # Flattened frame size = 64 * 64 * 3 = 12288
-        self.embedding = nn.Linear(64 * 64 * 3, embed_dim)
-        # Let's allow up to 64 frames in a clip for positional encoding
+        self.embedding = nn.Linear(64 * 64 * 3, embed_dim)  # 12288 → embed_dim
         self.positional_encoding = nn.Parameter(torch.randn(1, 64, embed_dim))
-
         encoder_layer = nn.TransformerEncoderLayer(d_model=embed_dim, nhead=num_heads)
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        
         self.fc = nn.Linear(embed_dim, num_classes)
 
     def forward(self, x):
-        """
-        x: shape (batch_size, frames, channels, height, width)
-        """
+        # x: (batch_size, frames, channels, height, width)
         x = x.float()
         batch_size, frames, c, h, w = x.size()
-        
-        # Flatten each frame => (batch_size, frames, 64*64*3)
         x = x.reshape(batch_size, frames, -1)
-        
-        # Embedding + positional encoding
         x = self.embedding(x) + self.positional_encoding[:, :frames, :]
-
-        # Transformer expects (sequence_length, batch_size, embed_dim)
-        x = x.transpose(0, 1)  # => (frames, batch_size, embed_dim)
-        
-        # Pass through the Transformer
-        x = self.transformer(x)  # => (frames, batch_size, embed_dim)
-        
-        x = x.transpose(0, 1)    # => (batch_size, frames, embed_dim)
-        x = x.mean(dim=1)        # average over frames
-
+        x = x.transpose(0, 1)
+        x = self.transformer(x)
+        x = x.transpose(0, 1)
+        x = x.mean(dim=1)
         return self.fc(x)
 
 class VideoCNNClassifier(nn.Module):
     """
     A simple 2D CNN that averages frames over time and then classifies.
-    Input frames are 64x64, then we do two conv-pool blocks.
+    Input frames are 64x64; two conv-pool blocks.
     """
     def __init__(self, num_classes=101):
         super(VideoCNNClassifier, self).__init__()
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1)
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        # After two pooling layers, 64x64 becomes 16x16. With 64 channels, that gives 64 * 16 * 16 = 16384 features.
         self.fc1 = nn.Linear(64 * 16 * 16, 256)
         self.fc2 = nn.Linear(256, num_classes)
 
     def forward(self, x):
         # x: (batch_size, frames, channels, height, width)
         x = x.float()
-        # Average over time dimension (frames)
-        x = x.mean(dim=1)  # Now: (batch_size, 3, 64, 64)
-        x = torch.relu(self.conv1(x))   # (batch_size, 32, 64, 64)
-        x = self.pool(x)                # (batch_size, 32, 32, 32)
-        x = torch.relu(self.conv2(x))   # (batch_size, 64, 32, 32)
-        x = self.pool(x)                # (batch_size, 64, 16, 16)
-        x = x.view(x.size(0), -1)       # Flatten: (batch_size, 16384)
+        x = x.mean(dim=1)  # Average over frames → (batch_size, 3, 64, 64)
+        x = torch.relu(self.conv1(x))
+        x = self.pool(x)
+        x = torch.relu(self.conv2(x))
+        x = self.pool(x)
+        x = x.view(x.size(0), -1)
         x = torch.relu(self.fc1(x))
         x = self.fc2(x)
         return x
@@ -87,53 +74,91 @@ def custom_collate(batch):
         filtered_batch.append((video, label))
     return torch.utils.data.dataloader.default_collate(filtered_batch)
 
-def train_cnn(rank, world_size, epochs=10, lr=0.001):
-    # Typically you want one process per GPU. Here we assume that each process sees one local GPU.
-    # NOTE: setup + print checks for multiple device(s)
-    device_type = "cuda" if torch.cuda.is_available() else "cpu"
-    device_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
-    current_device = torch.cuda.current_device() if torch.cuda.is_available() else "N/A"
+def train_cnn(rank, world_size, model, train_loader, test_loader, epochs=10, lr=0.001, save_dir='./checkpoints', resume_epoch=0):
+    setup(rank, world_size)
 
-    print(f"Device type: {device_type}")
-    print(f"Device count: {device_count}")
-    print(f"Current device: {current_device}")
-
-    if torch.cuda.is_available():
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-        print(f"Process {rank} using device {torch.cuda.current_device()}")
-        device = torch.device("cuda", rank % device_count)
+    # NOTE: If resuming from a checkpoint, load state dict (only rank 0 needs to load, then send to other GPUs/ranks).
+    checkpoint_path = os.path.join(save_dir, f'model_epoch_{resume_epoch}.pth')
+    if resume_epoch > 0 and os.path.exists(checkpoint_path):
+        map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
+        checkpoint = torch.load(checkpoint_path, map_location=map_location)
+        model.load_state_dict(checkpoint)
+        print(f"[GPU {rank}] Loaded checkpoint from {checkpoint_path}")
     else:
-        device = torch.device("cpu")
+        if rank == 0 and resume_epoch > 0:
+            print(f"Checkpoint {checkpoint_path} not found; starting from scratch.")
 
-    print(f"Using device: {device}")
-    dist.init_process_group(backend="nccl", init_method="env://", world_size=world_size, rank=rank) # The 'env://' method expects SLURM (or your launcher) to set WORLD_SIZE and RANK.
+    # NOTE: Update the sampler's rank for the current process.
+    train_loader.sampler.rank = rank
+    test_loader.sampler.rank = rank
 
-    # Set up transforms and dataset.
+    model = model.to(rank)
+    model = DDP(model, device_ids=[rank])
+    criterion = nn.CrossEntropyLoss().to(rank)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+
+    start_epoch = resume_epoch
+    for epoch in range(start_epoch, epochs):
+        model.train()
+        train_loader.sampler.set_epoch(epoch)
+        running_loss = 0.0
+        # set up tqdm for rank=0 progress bar
+        if rank == 0: loop = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}", leave=False)
+        else: loop = train_loader
+
+        for videos, labels in loop:
+            videos = videos.to(rank)
+            labels = labels.to(rank)
+            optimizer.zero_grad()
+            outputs = model(videos)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item() * videos.size(0)
+        epoch_loss = running_loss / len(train_loader.dataset)
+        print(f"[GPU {rank}] Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}")
+
+        # NOTE: IMPORTANT-save checkpoint only from rank 0 as rank/device 0 is the master 
+        if rank == 0:
+            if not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            checkpoint_path = os.path.join(save_dir, f'model_epoch_{epoch+1}.pth')
+            torch.save(model.state_dict(), checkpoint_path)
+            print(f"Model saved to {checkpoint_path}")
+
+    cleanup()
+
+def main():
+    world_size = 2  # NOTE: john's VM have 2 GPUs. Adjust if on different hardware.
+    batch_size = 32
+    epochs = 10
+    resume_epoch = 9
+    lr = 0.001
+
     transform = Compose([Resize((64, 64))])
     full_dataset = UCF101(
-        root='./UCF101_DATA/UCF-101/',
-        annotation_path='./UCF101_DATA/ucfTrainTestlist',
-        frames_per_clip=16,    # Adjust if desired for faster training
-        step_between_clips=2,  # Can be increased to reduce the number of clips
+        root='./UCF101/UCF-101/',
+        annotation_path='./UCF101/ucfTrainTestlist',
+        frames_per_clip=16,
+        step_between_clips=2,
         train=True,
         transform=transform,
         output_format="TCHW"
     )
 
-    # Split into train/test splits (this split is performed on every process,
-    # but the DistributedSampler will ensure that each process sees a unique subset).
     total_size = len(full_dataset)
     train_size = int(0.8 * total_size)
     test_size = total_size - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [train_size, test_size])
 
-    # Use DistributedSampler to partition the data among all processes.
-    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
-    test_sampler  = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False)
+    # Create DistributedSamplers with a dummy rank (0). They will be updated in each spawned process.
+    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=0, shuffle=True)
+    test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=0, shuffle=False)
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=16,
+        batch_size=batch_size,
         sampler=train_sampler,
         collate_fn=custom_collate,
         num_workers=8,
@@ -141,63 +166,23 @@ def train_cnn(rank, world_size, epochs=10, lr=0.001):
     )
     test_loader = DataLoader(
         test_dataset,
-        batch_size=16,
+        batch_size=batch_size,
         sampler=test_sampler,
         collate_fn=custom_collate,
         num_workers=8,
         pin_memory=True
     )
 
-    # Create and wrap the model with DistributedDataParallel.
-    model = VideoCNNClassifier(num_classes=101).to(device)
-    model = DDP(model, device_ids=[rank % torch.cuda.device_count()])
+    model = VideoCNNClassifier(num_classes=101)
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-
-    print("train and test loaders", len(train_loader), len(test_loader))
-    for epoch in range(epochs):
-        model.train()
-        # Set the epoch for the sampler for proper shuffling.
-        train_sampler.set_epoch(epoch)
-        running_loss = 0.0
-        for videos, labels in train_loader:
-            print(len(videos), labels)
-            videos = videos.to(device)
-            labels = labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(videos)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item() * videos.size(0)
-        epoch_loss = running_loss / len(train_sampler)
-
-        # Print from the rank 0 process to avoid duplicate logs:
-        if rank == 0: print(f"[CNN] Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}") 
-
-    # Evaluate the model (each process computes its own portion).
-    model.eval()
-    correct, total = 0, 0
-    with torch.no_grad():
-        for videos, labels in test_loader:
-            videos = videos.to(device)
-            labels = labels.to(device)
-            outputs = model(videos)
-            _, predicted = torch.max(outputs, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    # NOTE: Optionally, aggregate accuracy across processes. Here we simply print from rank 0.
-    if rank == 0:
-        accuracy = 100 * correct / total
-        print(f"[CNN] Final Test Accuracy: {accuracy:.2f}%")
-
-    dist.destroy_process_group()
+    mp.spawn(
+        train_cnn,
+        args=(world_size, model, train_loader, test_loader, epochs, lr, './checkpoints', resume_epoch),
+        nprocs=world_size,
+        join=True
+    )
 
 if __name__ == '__main__':
-    # For example, if you request --nodes=4 and --ntasks-per-node=4, then the total world size is 16.
-    world_size = int(os.environ.get("WORLD_SIZE", 16))  # total number of processes
-    rank = int(os.environ.get("RANK", 0))  # unique rank of this process
-    train_cnn(rank, world_size, epochs=10, lr=0.001)
-
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
+    main()

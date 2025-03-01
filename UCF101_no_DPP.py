@@ -88,6 +88,8 @@ def train_cnn(model, train_loader, test_loader, device, epochs=10, lr=0.001, sav
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
+    if not os.path.exists(save_dir): os.makedirs(save_dir)
+
     # Training Loop
     print(len(train_loader))
     for epoch in range(epochs):
@@ -129,8 +131,8 @@ def main():
 
     transform = Compose([Resize((64, 64))])
     full_dataset = UCF101(
-        root='./UCF101_DATA/UCF-101/',
-        annotation_path='./UCF101_DATA/ucfTrainTestlist',
+        root='./UCF101/UCF-101/',
+        annotation_path='./UCF101/ucfTrainTestlist',
         frames_per_clip=16,
         step_between_clips=2,
         train=True,
@@ -163,7 +165,7 @@ def main():
     )
 
     model_cnn = VideoCNNClassifier(num_classes=101).to(device)
-    train_cnn(model_cnn, train_loader, test_loader, device, epochs=5, lr=0.001)
+    train_cnn(model_cnn, train_loader, test_loader, device, epochs=10, lr=0.001)
     test_cnn(model_cnn, test_loader, device)
 
 
