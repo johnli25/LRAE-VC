@@ -27,9 +27,6 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 - [x] ~~Implement and incorporate object classification into the autoencoder NN. How to do this? --> (https://docs.google.com/document/d/1svHaRZ1yiAsARJDC_MInBo5Ln_tRjIg14dhBlCV_UsI/edit?usp=sharing)~~
 
 ### Specific TODOs + Issues Log
-- [x] Use FFmpeg to convert videos in test + train dataset into actual .mp4 videos and analyze: bytes, P/I/B frames breakdown, is it possible to even convert 224x224 PNGs to mp4 videos? 
-- [ ] Finish reading GRACE and Reparo papers
-- [ ] Make GRACE runnable (initially delegated to AJ tho)
 
 ### Notes + Other References:
 - Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
