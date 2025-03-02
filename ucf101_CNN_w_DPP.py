@@ -9,6 +9,7 @@ from torchvision.datasets import UCF101
 from torchvision.transforms import Compose, Resize
 import torch.multiprocessing as mp
 from tqdm import tqdm
+from transformers import VideoMAEForVideoClassification, VideoTransformer, VideoMAEFeatureExtractor 
 
 def setup(rank, world_size):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
