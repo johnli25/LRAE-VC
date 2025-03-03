@@ -157,7 +157,7 @@ def main():
         step_between_clips=2,
         train=True,
         transform=transform,
-        output_format="THWC" # NOTE: UNFORTUNATELY, VideoMAEFeatureExtractor only supports "THWC" format (instead of CTHW which is what VideoMAE model expects)
+        output_format="THWC" # NOTE: UNFORTUNATELY, UCF101 dataset only supports "THWC" format (instead of CTHW which is what VideoMAE feature extractor/model expects)
     )
 
     total_size = len(full_dataset)
@@ -185,7 +185,7 @@ def main():
         pin_memory=True
     )
 
-    # Load a pretrained VideoMAE model for video classification (fine-tuned on Kinetics)
+    # Load a pretrained VideoMAE model for vdideo classification (fine-tuned on Kinetics)
     model = VideoMAEForVideoClassification.from_pretrained(
         "nateraw/videomae-base-finetuned-ucf101", num_labels=101
         # "MCG-NJU/videomae-base-finetuned-kinetics", num_labels=101 
