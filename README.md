@@ -31,5 +31,7 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 ### Notes + Other References:
 - Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
 
-### Dev Log
-- NOTE: If you run `python autoencoder_train.py --model="PNC_NoTail"` any `max_tail_len`, `tail_length`, and related vars will be technically misleading. I didn't feel like updating the variable names in the code b/c lazy 😆, but functionally, PNC_NoTail should be fine.
+### Dev Log + Misc helpful notes:
+- just do `ssh gpua058` in another terminal to access from another termina
+- `nvidia-smi` for GPU stats
+- `du -sh path_to_file_or_folder` to show disk space of folder or file
