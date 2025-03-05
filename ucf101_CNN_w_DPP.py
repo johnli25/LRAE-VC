@@ -11,6 +11,8 @@ import torch.multiprocessing as mp
 from tqdm import tqdm
 from transformers import VideoMAEForVideoClassification, VideoTransformer, VideoMAEFeatureExtractor 
 
+# TODO: run on BOTH vms' GPUs: 1) this .py for 100 imgs (saved as ACTUAL images so create a new folder + comment out video processing function) 2) this .py for a few videos for the SAME 100 imgs (use video processing function)
+
 def setup(rank, world_size):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)

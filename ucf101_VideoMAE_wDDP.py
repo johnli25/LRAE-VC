@@ -12,9 +12,12 @@ from tqdm import tqdm
 from transformers import VideoMAEForVideoClassification, VideoMAEFeatureExtractor
 import matplotlib.pyplot as plt
 
+
 def setup(rank, world_size):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
+    print("Current deivce", torch.cuda.current_device())
+    print(f"[GPU {rank}] Initialized with world size {world_size}")
 
 def cleanup():
     dist.destroy_process_group()
@@ -141,8 +144,8 @@ def test_videomae(rank, world_size, model, feature_extractor, test_loader):
 
 
 def main():
-    world_size = 2  # NOTE: john's VM have 2 GPUs. Adjust if on different hardware.
-    batch_size = 8  # Batch size per GPU (adjust for memory)
+    world_size = 4  # NOTE: john's VM have 2 GPUs. Adjust if on different hardware.
+    batch_size = 16  # Batch size per GPU (adjust for memory)
     epochs = 5
     resume_epoch = 0
     lr = 3e-5
