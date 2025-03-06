@@ -151,7 +151,7 @@ def main():
     lr = 3e-5
 
     feature_extractor = VideoMAEFeatureExtractor.from_pretrained("MCG-NJU/videomae-base") # Use the VideoMAE feature extractor (preprocessing pipeline)
-
+    print("Finished loading VideoMAE feature extractor. Loading UCF101 dataset...")
     transform = Compose([]) # NOTE: VideoMAEFeatureExtractor will automatically resize the frames to 224x224 (so remove `Resize((224, 224))` for now)
     full_dataset = UCF101(
         root='./UCF101/UCF-101/',
@@ -162,6 +162,8 @@ def main():
         transform=transform,
         output_format="THWC" # NOTE: UNFORTUNATELY, UCF101 dataset only supports "THWC" format (instead of CTHW which is what VideoMAE feature extractor/model expects)
     )
+
+    print("Finished loading UCF101 dataset. Splitting into train/test sets...")
 
     total_size = len(full_dataset)
     train_size = int(0.8 * total_size)
@@ -176,7 +178,7 @@ def main():
         batch_size=batch_size,
         sampler=train_sampler,
         collate_fn=custom_collate,
-        num_workers=8,
+        num_workers=1,
         pin_memory=True
     )
     test_loader = DataLoader(
@@ -184,16 +186,17 @@ def main():
         batch_size=batch_size,
         sampler=test_sampler,
         collate_fn=custom_collate,
-        num_workers=8,
+        num_workers=1,
         pin_memory=True
     )
-
+    print("Finished creating train/test dataloaders. Loading model now...")
     # Load a pretrained VideoMAE model for vdideo classification (fine-tuned on Kinetics)
     model = VideoMAEForVideoClassification.from_pretrained(
         "nateraw/videomae-base-finetuned-ucf101", num_labels=101
         # "MCG-NJU/videomae-base-finetuned-kinetics", num_labels=101 
     )
 
+    print("Finished loading model. Starting training/testing on GPUs..")
     mp.spawn(
         train_videomae,
         args=(world_size, model, feature_extractor, train_loader, test_loader, epochs, lr, './checkpoints', resume_epoch),
@@ -209,6 +212,6 @@ def main():
     )
 
 if __name__ == '__main__':
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
+    # os.environ["MASTER_ADDR"] = "localhost"
+    # os.environ["MASTER_PORT"] = "12355"
     main()
