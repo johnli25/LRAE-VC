@@ -67,7 +67,7 @@ def read_video_from_frames(video_path, num_frames=16):
     return frames
 
 def main():
-    video_dir = "./Kinetics-400-test-subset" # NOTE: click this link to access an example: https://www.kaggle.com/datasets/ipythonx/k4testset?resource=download
+    video_dir = "./Kinetics-400-subset-6-videos" # NOTE: click this link to access an example: https://www.kaggle.com/datasets/ipythonx/k4testset?resource=download
     video_files = os.listdir(video_dir)
     output_dir = "./Kinetics-400-test-subset-output"
     os.makedirs(output_dir, exist_ok=True)  
