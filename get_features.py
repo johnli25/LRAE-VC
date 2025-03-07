@@ -106,7 +106,6 @@ if __name__ == "__main__":
         combined_features_folder = "TestNew3_combined_features/"
 
     
-
     img_height, img_width = 224, 224  # NOTE: Dependent on autoencoder architecture!!!
     batch_size = 32
     transform = transforms.Compose([

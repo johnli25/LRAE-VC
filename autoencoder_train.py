@@ -89,15 +89,15 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
-    # Final Test: test_autoencoder()
-    test_loss = eval_autoencoder(model, test_loader, criterion, device, max_tail_length)
-    print(f"Final Test Loss: {test_loss:.4f}")
-
     plot_train_val_loss(train_losses, val_losses)
 
     # Save final model
     if max_tail_length: torch.save(model.state_dict(), f"{model_name}_final_w_random_drops.pth")
     else: torch.save(model.state_dict(), f"{model_name}_final_no_dropouts.pth")
+
+    # Final Test: test_autoencoder()
+    test_loss = eval_autoencoder(model, test_loader, criterion, device, max_tail_length)
+    print(f"Final Test Loss: {test_loss:.4f}")
 
 
 def eval_autoencoder(model, dataloader, criterion, device, max_tail_length):
@@ -236,7 +236,7 @@ if __name__ == "__main__":
 
     # Split train_val_indices into train and validation
     np.random.shuffle(train_val_indices)
-    train_size = int(0.8 * len(train_val_indices))
+    train_size = int(0.9 * len(train_val_indices))
     val_size = len(train_val_indices) - train_size
 
     train_indices = train_val_indices[:train_size]
