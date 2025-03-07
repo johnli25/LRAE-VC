@@ -31,7 +31,7 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 ### Notes + Other References:
 - Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
 
-### Dev Log + Misc helpful notes:
+### Dev Log + Misc System CMDs:
 - just do `ssh gpua058` in another terminal to access from another termina
 - `nvidia-smi` for GPU stats
 - `du -sh path_to_file_or_folder` to show disk space of folder or file
