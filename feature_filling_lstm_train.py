@@ -40,45 +40,9 @@ class CustomDataset(Dataset):
         
         # Convert to a torch tensor
         return torch.tensor(sequence_item, dtype=torch.float32)
-    
-
-def train_model(model, dataloader, criterion, optimizer, device):
-    """
-    Train the model for one epoch.
-    """
-    model.train()
-    epoch_loss = 0
-    for features in dataloader:
-        features = features.to(device)
-        target = features.clone()  # Clone the target to avoid accidental modification
-
-        # Determine how many frames to zero out
-        if features.shape[1] < 2:  # If the video consists of a single frame
-            num_zeroes = 0
-        elif features.shape[1] < 10:  # Zero out fewer frames for smaller videos
-            num_zeroes = int(np.random.uniform(0, 0.4) * features.shape[1])
-        else:
-            num_zeroes = int(np.random.uniform(0, 0.3) * features.shape[1])
-
-        # Randomly set some frames to 0 for the input
-        features = features.clone()  # Avoid in-place modification of the tensor
-        for _ in range(num_zeroes):
-            random_idx = np.random.randint(0, features.shape[1])
-            features[:, random_idx] = 0  # Set the frame to zeros
-        
-        # Forward pass
-        output_seq = model(features)
-        loss = criterion(output_seq, target)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        epoch_loss += loss.item()
-    
-    return epoch_loss / len(dataloader)
 
 
-def train_model_with_mask(model, dataloader, criterion, optimizer, device):
+def train_model_w_totally_random_loss(model, dataloader, criterion, optimizer, device):
     model.train()
     epoch_loss = 0
     for batch_idx, features in enumerate(dataloader):
@@ -87,7 +51,7 @@ def train_model_with_mask(model, dataloader, criterion, optimizer, device):
 
         # Determine which frames to zero out based on drop_probability
         sequence_length = features.shape[1]
-        if sequence_length < 2:
+        if sequence_length < 2: # very short video lol
             drop_probability = 0.0  # Don't drop/mask anything
         elif sequence_length < 10:
             drop_probability = 0.15  # Drop up to 15%
@@ -132,23 +96,7 @@ def train_model_with_mask(model, dataloader, criterion, optimizer, device):
     return average_loss
 
 
-def evaluate_model(model, dataloader, criterion, device):
-    """
-    Evaluate the model on validation or test set.
-    """
-    model.eval()
-    epoch_loss = 0
-    with torch.no_grad():
-        for features in dataloader:
-            features = features.to(device)
-            target = features.clone()  # Clone the target to avoid accidental modification
-            output_seq = model(features)
-            loss = criterion(output_seq, target)
-            epoch_loss += loss.item()
-    return epoch_loss / len(dataloader)
-
-
-def evaluate_model_with_mask(model, dataloader, criterion, device):
+def eval_model_w_totally_random_loss(model, dataloader, criterion, device):
     """
     Evaluate the model on validation or test set.
     """
@@ -173,88 +121,161 @@ def evaluate_model_with_mask(model, dataloader, criterion, device):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Get features of desired model")
-    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_NoTail", "LRAE_VC"], 
+    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_16", "LRAE_VC", "TestNew", "TestNew2", "TestNew3"], 
                         help="Model to train")
     return parser.parse_args()
 
-args = parse_args()
-# Configuration
-epochs = 60
-if args.model == "PNC":
-    input_dim = 32 * 32
-    output_dim = 32 * 32
-    num_features = 10    
-    folder_path = "PNC_combined_features"
-if args.model == "LRAE_VC":
-    input_dim = 28 * 28
-    output_dim = 28 * 28
-    num_features = 16    
-    folder_path = "LRAE_VC_combined_features"
-if args.model == "PNC_NoTail": # unsure if this is necessary or we just needthe first two
-    input_dim = 32 * 32
-    output_dim = 32 * 32
-    num_features = 10    
-    folder_path = "PNC_NoTail_combined_features"
 
-batch_size = 1
-hidden_dim = 128  # Tuned hyperparameter for LSTM
-num_layers = 2
-learning_rate = 0.001
+if __name__ == "__main__": 
+    args = parse_args()
+    # Configuration
+    epochs = 160
+    if args.model == "PNC":
+        input_dim = 32 * 32
+        output_dim = 32 * 32
+        num_features = 10    
+        folder_path = "PNC_combined_features"
+    if args.model == "PNC_16":
+        input_dim = 32 * 32
+        output_dim = 32 * 32
+        num_features = 16
+        folder_path = "PNC_16_combined_features"
+    if args.model == "LRAE_VC":
+        input_dim = 28 * 28
+        output_dim = 28 * 28
+        num_features = 16    
+        folder_path = "LRAE_VC_combined_features"
+    if args.model == "TestNew":
+        input_dim = 48 * 48
+        output_dim = 48 * 48
+        num_features = 24    
+        folder_path = "TestNew_combined_features"
+    if args.model == "TestNew2":
+        input_dim = 56 * 56
+        output_dim = 56 * 56
+        num_features = 24    
+        folder_path = "TestNew2_combined_features"
+    if args.model == "TestNew3":
+        input_dim = 38 * 38
+        output_dim = 38 * 38
+        num_features = 24    
+        folder_path = "TestNew3_combined_features"
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print(device)
+    batch_size = 1
+    hidden_dim = 128  # Tuned hyperparameter for LSTM
+    num_layers = 2
+    learning_rate = 0.001
 
-for i in range(num_features):
-    # TRAINING FOR FEATURE INDEX i
-    print(f"Training for Feature {i}")
-    model = FrameSequenceLSTM(input_dim, hidden_dim, output_dim, num_layers).to(device)
-    # criterion = nn.MSELoss() # NOTE: to use train_model()
-    criterion = nn.MSELoss(reduction='none') # NOTE: to use train_mode_with_mask()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    dataset = CustomDataset(folder_path, i)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(device)
+
+    for i in range(num_features):
+        # TRAINING FOR FEATURE INDEX i
+        print(f"Training for Feature {i}")
+        model = FrameSequenceLSTM(input_dim, hidden_dim, output_dim, num_layers).to(device)
+        # criterion = nn.MSELoss() # NOTE: to use train_model()
+        criterion = nn.MSELoss(reduction='none') # NOTE: to use train_mode_with_mask()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        dataset = CustomDataset(folder_path, i)
+        
+        # Shuffle dataset indices and create splits: 70% train, 15% validation, 15% test
+        all_indices = list(range(len(dataset)))
+        np.random.shuffle(all_indices)
+        train_end = int(0.7 * len(dataset))
+        val_end = int(0.85 * len(dataset))
+        train_indices = all_indices[:train_end]
+        val_indices = all_indices[train_end:val_end]
+        test_indices = all_indices[val_end:]
+
+        # Subsets for train, validation, and test
+        train_dataset = Subset(dataset, train_indices)
+        val_dataset = Subset(dataset, val_indices)
+        test_dataset = Subset(dataset, test_indices)
+
+        # Dataloaders
+        train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
+        min_val_loss = float('inf')
+
+        for epoch in range(epochs):
+            # TRAINING PHASE
+            # train_loss = train_model(model, train_dataloader, criterion, optimizer, device) # NOTE: to use train_model()
+            train_loss = train_model_w_totally_random_loss(model, train_dataloader, criterion, optimizer, device) # NOTE: to use train_model_with_mask()
+            print(f"[Feature {i}] Epoch {epoch}, Training Loss: {train_loss:.4f}")
+            
+            # VALIDATION PHASE
+            # val_loss = evaluate_model(model, val_dataloader, criterion, device)
+            val_loss = eval(model, val_dataloader, criterion, device)
+            print(f"[Feature {i}] Epoch {epoch}, Validation Loss: {val_loss:.4f}")
+            
+            # Save the best model based on validation loss
+            if val_loss < min_val_loss:
+                print("New Best Model Found! Saving...")
+                min_val_loss = val_loss
+                torch.save(model.state_dict(), f"features_num_directory/feature_{i}_best_validation.pth")
+
+        # TESTING PHASE
+        # test_loss = evaluate_model(model, test_dataloader, criterion, device)
+        test_loss = eval_model_w_totally_random_loss(model, val_dataloader, criterion, device)
+        print(f"[Feature {i}] Final Test Loss: {test_loss:.4f}")
+
+        # Save the final model after training
+        torch.save(model.state_dict(), f"features_num_directory/feature_{i}_final.pth")
+
+
+
+
+# NOTE: Deprecated functions
+# def train_model(model, dataloader, criterion, optimizer, device):
+#     """
+#     Train the model for one epoch.
+#     """
+#     model.train()
+#     epoch_loss = 0
+#     for features in dataloader:
+#         features = features.to(device)
+#         target = features.clone()  # Clone the target to avoid accidental modification
+
+#         # Determine how many frames to zero out
+#         if features.shape[1] < 2:  # If the video consists of a single frame
+#             num_zeroes = 0
+#         elif features.shape[1] < 10:  # Zero out fewer frames for smaller videos
+#             num_zeroes = int(np.random.uniform(0, 0.4) * features.shape[1])
+#         else:
+#             num_zeroes = int(np.random.uniform(0, 0.3) * features.shape[1])
+
+#         # Randomly set some frames to 0 for the input
+#         features = features.clone()  # Avoid in-place modification of the tensor
+#         for _ in range(num_zeroes):
+#             random_idx = np.random.randint(0, features.shape[1])
+#             features[:, random_idx] = 0  # Set the frame to zeros
+        
+#         # Forward pass
+#         output_seq = model(features)
+#         loss = criterion(output_seq, target)
+#         optimizer.zero_grad()
+#         loss.backward()
+#         optimizer.step()
+
+#         epoch_loss += loss.item()
     
-    # Shuffle dataset indices and create splits: 70% train, 15% validation, 15% test
-    all_indices = list(range(len(dataset)))
-    np.random.shuffle(all_indices)
-    train_end = int(0.7 * len(dataset))
-    val_end = int(0.85 * len(dataset))
-    train_indices = all_indices[:train_end]
-    val_indices = all_indices[train_end:val_end]
-    test_indices = all_indices[val_end:]
-
-    # Subsets for train, validation, and test
-    train_dataset = Subset(dataset, train_indices)
-    val_dataset = Subset(dataset, val_indices)
-    test_dataset = Subset(dataset, test_indices)
-
-    # Dataloaders
-    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
-    min_val_loss = float('inf')
-
-    for epoch in range(epochs):
-        # TRAINING PHASE
-        # train_loss = train_model(model, train_dataloader, criterion, optimizer, device) # NOTE: to use train_model()
-        train_loss = train_model_with_mask(model, train_dataloader, criterion, optimizer, device) # NOTE: to use train_model_with_mask()
-        print(f"[Feature {i}] Epoch {epoch}, Training Loss: {train_loss:.4f}")
+#     return epoch_loss / len(dataloader)
         
-        # VALIDATION PHASE
-        # val_loss = evaluate_model(model, val_dataloader, criterion, device)
-        val_loss = evaluate_model_with_mask(model, val_dataloader, criterion, device)
-        print(f"[Feature {i}] Epoch {epoch}, Validation Loss: {val_loss:.4f}")
-        
-        # Save the best model based on validation loss
-        if val_loss < min_val_loss:
-            print("New Best Model Found! Saving...")
-            min_val_loss = val_loss
-            torch.save(model.state_dict(), f"features_num_directory/feature_{i}_best_validation.pth")
+# def evaluate_model(model, dataloader, criterion, device):
+#     """
+#     Evaluate the model on validation or test set.
+#     """
+#     model.eval()
+#     epoch_loss = 0
+#     with torch.no_grad():
+#         for features in dataloader:
+#             features = features.to(device)
+#             target = features.clone()  # Clone the target to avoid accidental modification
+#             output_seq = model(features)
+#             loss = criterion(output_seq, target)
+#             epoch_loss += loss.item()
+#     return epoch_loss / len(dataloader)
 
-    # TESTING PHASE
-    # test_loss = evaluate_model(model, test_dataloader, criterion, device)
-    test_loss = evaluate_model_with_mask(model, val_dataloader, criterion, device)
-    print(f"[Feature {i}] Final Test Loss: {test_loss:.4f}")
 
-    # Save the final model after training
-    torch.save(model.state_dict(), f"features_num_directory/feature_{i}_final.pth")

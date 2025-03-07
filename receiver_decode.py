@@ -6,7 +6,7 @@ import struct
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import defaultdict
-from models import PNC_Autoencoder, LRAE_VC_Autoencoder, FrameSequenceLSTM
+from models import PNC_Autoencoder, LRAE_VC_Autoencoder, FrameSequenceLSTM, TestNew, TestNew2, TestNew3
 
 frameID_to_latent_encodings = None # defaultdict(lambda: np.zeros((10, 32, 32), dtype=np.float32))
 encoding_shape = None
@@ -28,8 +28,9 @@ def load_model(model_path, device):
     elif "LRAE_VC" in model_path:
         model = LRAE_VC_Autoencoder()
         encoding_shape = (16, 28, 28)
-    else:
-        raise ValueError(f"Unknown model type in model_path: {model_path}")
+    elif "TestNew3" in model_path:
+        model = TestNew3()
+        encoding_shape = (24, 38, 38)
     
     # Initialize the frameID_to_latent_encodings dictionary dynamically
     frameID_to_latent_encodings = defaultdict(lambda: np.zeros(encoding_shape, dtype=np.float32))
@@ -70,7 +71,6 @@ def decode_and_store(conn):
             break
 
 
-# AJ FILLS THIS IN... Need to fill in missing features in the dictionary using the corresponding LSTM model
 def feature_filler(device, input_dim, hidden_dim, output_dim, num_layers):
     video_tensors = {}
     for (video_number, image_number), tensor in frameID_to_latent_encodings.items():
@@ -144,28 +144,29 @@ def print_frameID_to_latent_encodings(output_file):
 
 if __name__ == "__main__":
     # Hyperparameters
-    input_dim = 32 * 32  # Flattened frame size (idk if this is 32x32 or 28x28)
     hidden_dim = 128 # Tuned hyperparameter for LSTM
-    output_dim = 32 * 32 #(THIS AND INPUT_DIM NEED TO BE CHANGED BASED ON ARCHITECTURE)
     num_layers = 2
 
     args = parse_args()
-
+    if "TestNew3" in args.model_path: print("yes", args.model_path)
     if "PNC" in args.model_path:
         input_dim = 32 * 32  # Flattened frame size (idk if this is 32x32 or 28x28)
         output_dim = 32 * 32 #(THIS AND INPUT_DIM NEED TO BE CHANGED BASED ON ARCHITECTURE)
     elif "LRAE_VC" in args.model_path:
         input_dim = 28 * 28  # Flattened frame size (idk if this is 32x32 or 28x28)
         output_dim = 28 * 28 #(THIS AND INPUT_DIM NEED TO BE CHANGED BASED ON ARCHITECTURE)
+    elif "TestNew3" in args.model_path:
+        input_dim = 38 * 38 # Flattened frame size (idk if this is 32x32 or 28x28)
+        output_dim = 38 * 38 #(THIS AND INPUT_DIM NEED TO BE CHANGED BASED ON ARCHITECTURE)
     else:
-        raise ValueError(f"Unknown model type in model_path: {args.model_path}")
+        print(f"Unknown model type in model_path: {args.model_path}")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("device:", device)
     
     model = load_model(args.model_path, device) # Load the model
     
-    # Set up server socket
+    # set up server socket
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind((args.host, args.port))
     server_socket.listen(1)
@@ -177,10 +178,10 @@ if __name__ == "__main__":
     try:
         decode_and_store(conn)
         feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
-        decode_full_frame_and_save_all(model, output_dir="LRAE_VC_w_dropouts_received_and_decoded_frames_filled/", device=device)
+        decode_full_frame_and_save_all(model, output_dir="TestNew3_w_dropouts_received_and_decoded_frames_filled/", device=device)
     finally:
         conn.close()
         server_socket.close()
 
 
-    print_frameID_to_latent_encodings("frameID_to_latent_encodings.txt")
+    # print_frameID_to_latent_encodings("frameID_to_latent_encodings.txt")

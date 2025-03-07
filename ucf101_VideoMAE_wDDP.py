@@ -178,7 +178,7 @@ def main():
         batch_size=batch_size,
         sampler=train_sampler,
         collate_fn=custom_collate,
-        num_workers=1,
+        num_workers=16,
         pin_memory=True
     )
     test_loader = DataLoader(
@@ -186,7 +186,7 @@ def main():
         batch_size=batch_size,
         sampler=test_sampler,
         collate_fn=custom_collate,
-        num_workers=1,
+        num_workers=16,
         pin_memory=True
     )
     print("Finished creating train/test dataloaders. Loading model now...")
@@ -213,5 +213,5 @@ def main():
 
 if __name__ == '__main__':
     # os.environ["MASTER_ADDR"] = "localhost"
-    # os.environ["MASTER_PORT"] = "12355"
+    # os.environ["MASTER_PORT"] = "12345"
     main()

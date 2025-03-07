@@ -227,7 +227,7 @@ def main():
         batch_size=batch_size,
         sampler=test_sampler,
         collate_fn=custom_collate,
-        num_workers=8,
+        num_workers=8, 
         pin_memory=True
     )
 

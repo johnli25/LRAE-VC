@@ -62,7 +62,6 @@ class PNC_Autoencoder(nn.Module):
         return y5
     
 
-
 class PNC_16(nn.Module):
     def __init__(self):
         super(PNC_16, self).__init__()
@@ -115,8 +114,6 @@ class PNC_16(nn.Module):
         return y5
     
 
-
-######
 class TestNew(nn.Module):
     def __init__(self):
         super(TestNew, self).__init__()
@@ -218,7 +215,7 @@ class TestNew(nn.Module):
 
         output = self.decode(latent)
         return output
-#####
+
 
 class TestNew2(nn.Module):
     def __init__(self):
@@ -318,8 +315,109 @@ class TestNew2(nn.Module):
 
         output = self.decode(latent)
         return output
+    
 
+class TestNew3(nn.Module):
+    def __init__(self):
+        super(TestNew3, self).__init__()
 
+        # Encoder
+        self.encoder1 = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, stride=2, padding=1),  # (3,224,224) -> (16,112,112)
+            nn.BatchNorm2d(16),
+            nn.LeakyReLU(0.1)
+        )
+        # Modified encoder2 with stride=3 for stronger downsampling:
+        self.encoder2 = nn.Sequential(
+            nn.Conv2d(16, 24, kernel_size=3, stride=3, padding=1),  # (16,112,112) -> (24,38,38)
+            nn.BatchNorm2d(24),
+            nn.LeakyReLU(0.1)
+        )
+
+        # Decoder
+        # Modified decoder1 to match encoder2's stride:
+        self.decoder1 = nn.Sequential(
+            nn.ConvTranspose2d(24, 48, kernel_size=3, stride=3, padding=1, output_padding=0),  # (24,38,38) -> (48,112,112)
+            nn.BatchNorm2d(48),
+            nn.LeakyReLU(0.1)
+        )
+
+        self.residual1 = nn.Conv2d(48, 48, kernel_size=1, stride=1, padding=0)  # (48,112,112) -> (48,112,112)
+
+        self.decoder2 = nn.Sequential(
+            nn.ConvTranspose2d(48, 32, kernel_size=3, stride=2, padding=1, output_padding=1),  # (48,112,112) -> (32,224,224)
+            nn.BatchNorm2d(32),
+            nn.LeakyReLU(0.1)
+        )
+
+        self.residual2 = nn.Conv2d(32, 32, kernel_size=1, stride=1, padding=0)  # (32,224,224) -> (32,224,224)
+
+        self.decoder3 = nn.Sequential(
+            nn.ConvTranspose2d(32, 64, kernel_size=3, stride=1, padding=1),  # (32,224,224) -> (64,224,224)
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.1)
+        )
+
+        self.residual3 = nn.Conv2d(64, 64, kernel_size=1, stride=1, padding=0)  # (64,224,224) -> (64,224,224)
+
+        # Refinement layers
+        self.decoder4_1 = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),  
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.1)
+        )
+
+        self.decoder4_2 = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),  
+            nn.BatchNorm2d(64),
+            nn.LeakyReLU(0.1)
+        )
+
+        # Final output layer
+        self.decoder5 = nn.Sequential(
+            nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1),  # (64,224,224) -> (3,224,224)
+            nn.Sigmoid()
+        )
+
+        # Regularization
+        self.dropout = nn.Dropout(0.3)
+
+    def encode(self, x):
+        """Perform encoding only."""
+        x = self.encoder1(x)
+        x = self.encoder2(x)
+        return x  # Returns latent of shape (24,38,38)
+
+    def decode(self, x):
+        """Perform decoding only."""
+        y1 = self.decoder1(x)
+        y1 = y1 + self.residual1(y1)
+
+        y2 = self.decoder2(y1)
+        y2 = y2 + self.residual2(y2)
+
+        y3 = self.decoder3(y2)
+        y3 = y3 + self.residual3(y3)
+
+        # Refinement Layers
+        y4 = self.decoder4_1(y3)
+        y4 = self.decoder4_2(y4)
+
+        y5 = self.decoder5(y4)
+        return y5
+
+    def forward(self, x, random_drop=None):
+        latent = self.encode(x)
+
+        if random_drop is not None:
+            print("hit random_drop")
+            mask = (torch.rand(latent.size(1)) > random_drop).float().to(latent.device)
+            mask = mask.view(1, -1, 1, 1)
+            latent = latent * mask
+
+        latent = self.dropout(latent)
+        output = self.decode(latent)
+        return output
 
 
 class PNC_256Unet_Autoencoder(nn.Module):
@@ -372,8 +470,6 @@ class PNC_256Unet_Autoencoder(nn.Module):
         return reconstructed
 
 
-
-
 class PNC_with_classification(nn.Module):
     def __init__(self, autoencoder, num_classes):
         super(PNC_with_classification, self).__init__()
@@ -411,7 +507,6 @@ class PNC_with_classification(nn.Module):
         projected = self.feature_projection(features)  # (batch, 32, 1, 1)
         output = self.classifier(projected)
         return output
-
 
 
 # PNC modified for random interspersed dropouts instead of tail dropouts
@@ -610,7 +705,6 @@ class FrameSequenceLSTM(nn.Module):
         output = output.view(batch_size, sequence_length, height, width)
         return output
     
-
 
 class ComplexCNN(nn.Module):
     def __init__(self, num_classes):
