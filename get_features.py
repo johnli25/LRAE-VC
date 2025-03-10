@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from models import PNC_Autoencoder, PNC_16, LRAE_VC_Autoencoder, TestNew, TestNew2, TestNew3
+from models import PNC_Autoencoder, PNC16, LRAE_VC_Autoencoder, TestNew, TestNew2, TestNew3
 import argparse
     
 # Dataset class for loading images and ground truths
@@ -70,7 +70,7 @@ def process_and_save_features(model, dataloader, output_folder, device):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Get features of desired model")
-    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_16", "LRAE_VC", "TestNew", "TestNew2", "TestNew3"], 
+    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC16", "LRAE_VC", "TestNew", "TestNew2", "TestNew3"], 
                         help="Model to train")
     return parser.parse_args()
 
@@ -83,10 +83,10 @@ if __name__ == "__main__":
         model = PNC_Autoencoder().to(device)
         model.load_state_dict(torch.load("PNC_final_no_dropouts.pth")) # NOTE: Load full-features/no random drops model! 
         combined_features_folder = "PNC_combined_features/"
-    if args.model == "PNC_16":
-        model = PNC_16().to(device)
-        model.load_state_dict(torch.load("PNC_16_final_no_dropouts.pth")) 
-        combined_features_folder = "PNC_16_combined_features/"
+    if args.model == "PNC16":
+        model = PNC16().to(device)
+        model.load_state_dict(torch.load("PNC16_final_no_dropouts.pth")) 
+        combined_features_folder = "PNC16_combined_features/"
     if args.model == "LRAE_VC":
         model = LRAE_VC_Autoencoder().to(device)
         # model.load_state_dict(torch.load("LRAE_VC_final_no_dropouts.pth")) # NOTE: Load full-features/no random drops model! 

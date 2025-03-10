@@ -62,9 +62,9 @@ class PNC_Autoencoder(nn.Module):
         return y5
     
 
-class PNC_16(nn.Module):
+class PNC16(nn.Module):
     def __init__(self):
-        super(PNC_16, self).__init__()
+        super(PNC16, self).__init__()
         
         # Encoder
         self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (16, 32, 32)
@@ -100,7 +100,7 @@ class PNC_16(nn.Module):
     def forward(self, x, tail_length=None):
         # Encoder
         x2 = self.encode(x)  # (3, 224, 224) -> (16, 32, 32)
-
+        # print("encoded x2 shape: ", x2.shape)
         if tail_length is not None:
             # Zero out tail features for all samples in the batch
             batch_size, channels, _, _ = x2.size()

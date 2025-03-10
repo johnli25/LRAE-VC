@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC_Autoencoder, PNC_256Unet_Autoencoder, PNC_16, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
+from models import PNC_Autoencoder, PNC_256Unet_Autoencoder, PNC16, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
 
 # NOTE: uncomment below if you're using UCF Sports Action 
 class_map = {
@@ -23,6 +23,14 @@ test_img_names = {
 }
 
 # NOTE: uncomment below if you're using UCF101
+
+
+def get_labels_from_filename(filenames):
+    labels = []
+    for filename in filenames:
+        activity = "_".join(filename.split("_")[:-2])
+        labels.append(class_map[activity]) # NOTE: class_map is global
+    return labels
 
 
 # Dataset class for loading images and ground truths
@@ -177,21 +185,6 @@ def test_autoencoder_with_classification(model, dataloader, device):
     return accuracy
 
 
-def get_labels_from_filename(filenames):
-    labels = []
-    for filename in filenames:
-        activity = "_".join(filename.split("_")[:-2])
-        labels.append(class_map[activity]) # NOTE: class_map is global
-    return labels
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
-    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_256U", "PNC_16", "TestNew", "TestNew2", "TestNew3", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
-                        help="Model to train")
-    return parser.parse_args()
-
-
 def plot_train_val_loss(train_losses, val_losses):
     epochs = range(1, len(train_losses) + 1)
     plt.figure(figsize=(10, 6))
@@ -210,11 +203,16 @@ def plot_train_val_loss(train_losses, val_losses):
 
 
 if __name__ == "__main__":
+    def parse_args():
+        parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
+        parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_256U", "PNC16", "TestNew", "TestNew2", "TestNew3", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
+                            help="Model to train")
+        return parser.parse_args()
     args = parse_args()
 
     ## Hyperparameters
     num_epochs = 28
-    batch_size = 32
+    batch_size = 1
     learning_rate = 1e-3
     img_height, img_width = 224, 224 # NOTE: Dependent on autoencoder architecture!!
     path = "UCF_224x224x3_PNC_FrameCorr_input_imgs/" # NOTE: already resized to 224x224 (so not really adaptable), but faster
@@ -255,7 +253,7 @@ if __name__ == "__main__":
     val_dataset.dataset.transform = transform        
     test_dataset.dataset.transform = transform
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
@@ -271,8 +269,8 @@ if __name__ == "__main__":
     if args.model == "PNC_256U":
         model = PNC_256Unet_Autoencoder().to(device)
 
-    if args.model == "PNC_16":
-        model = PNC_16().to(device)
+    if args.model == "PNC16":
+        model = PNC16().to(device)
 
     if args.model == "TestNew":
         model = TestNew().to(device)

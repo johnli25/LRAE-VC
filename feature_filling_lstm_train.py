@@ -35,167 +35,162 @@ class CustomDataset(Dataset):
         # Load the file (assuming it's in numpy format)
         data = np.load(file_path)  # Expected shape: (X, 10, 32, 32) or similar
         swapped_data = np.swapaxes(data, 0, 1)  # Swap axes to get (10, X, 32, 32)
+        # print("file and data shape: ", file_path, swapped_data.shape) # NOTE: this print statement useful for debugging!!
 
         # Extract the specified feature sequence
         sequence_item = swapped_data[self.num]  
         
         # Convert to a torch tensor
-        return torch.tensor(sequence_item, dtype=torch.float32)
+        return torch.tensor(sequence_item, dtype=torch.float32), file_path # shape: [seq_length, 32, 32] b/c converted from [feature_i, seq_length, 32, 32] to [seq_length, 32, 32])
 
 
-def train_model_w_totally_random_loss(model, dataloader, criterion, optimizer, device):
+# phase 1: Pre-Training on Complete Sequences
+def pretrain_lstm_on_complete_sequences(model, dataloader, criterion, optimizer, device):
     model.train()
-    epoch_loss = 0
-    for batch_idx, features in enumerate(dataloader):
-        features = features.to(device)
-        target = features.clone()  # Clone the target to avoid accidental modification
-
-        # Determine which frames to zero out based on drop_probability
-        sequence_length = features.shape[1]
-        if sequence_length < 2: # very short video lol
-            drop_probability = 0.0  # Don't drop/mask anything
-        elif sequence_length < 10:
-            drop_probability = 0.15  # Drop up to 15%
-        else:
-            drop_probability = 0.25  # Drop 25%
-        mask = torch.rand(sequence_length, device=device) < drop_probability  # Shape: [sequence_length]
-        
-        if mask.sum() == 0:
-            # If no frames are dropped, skip this batch
-            continue
-        
-        # Expand mask to match the feature dimensions
-        mask_expanded = mask.unsqueeze(-1).unsqueeze(-1).expand_as(features)  # Shape: [batch_size, sequence_length, 32, 32] (Depends on model)
-        
-        # Zero out the selected frames in the input
-        input_features = features.clone()
-        input_features[mask_expanded] = 0  # Set the zeroed frames to zero
-
-        # Forward pass
-        output_seq = model(input_features)
-
-        # Compute loss only on zeroed-out frames
-        # Use 'reduction="none"' to compute element-wise loss
-        loss = criterion(output_seq, target)  # Shape: [batch_size, sequence_length, 32, 32]
-        
-        # Apply the mask to the loss
-        masked_loss = loss * mask_expanded.float()  # Only keep loss for zeroed frames
-        
-        # Compute the mean loss over the number of zeroed frames
-        print("Total sum of masked loss and # of masked/dropped feature tensors ", masked_loss.sum(), mask_expanded.float().sum())
-        loss_value = masked_loss.sum() / mask_expanded.float().sum()
-        
-        # Backward pass and optimization
+    epoch_loss, total_batches = 0, 0
+    for batch_idx, (features, filepath) in enumerate(dataloader):
+        features = features.to(device) # shape is [batch_size, seq_length, 32, 32] 
+        target = features.clone()
+        output_seq = model(features)
+        loss = criterion(output_seq, target).mean()  # Loss is computed as average over the entire sequence
         optimizer.zero_grad()
-        loss_value.backward()
+        loss.backward()
         optimizer.step()
+        epoch_loss += loss.item()
+        total_batches += 1
 
-        # Accumulate loss
-        epoch_loss += loss_value.item()
-    
-    # Compute average loss over all batches
-    average_loss = epoch_loss / len(dataloader)
-    return average_loss
+    return epoch_loss / total_batches
 
+# phase 2: Fine-Tuning on Sequences with Random Drops (one frame at a time)
+def finetune_lstm_on_dropped_latents_single(model, dataloader, criterion, optimizer, device):
+    model.train()
+    epoch_loss, total_batches = 0, 0
+    for batch_idx, (features, filepath) in enumerate(dataloader):
+        features = features.to(device)
+        batch_size, seq_len, latent_dim_height, latent_dim_width = features.shape 
 
+        drop_index = np.random.randint(seq_len)
+        target_latent = features[:, drop_index, :, :].clone()
 
-def train_model_grace_loss(model, dataloader, criterion, optimizer, device):
+        input_sequence = features.clone()
+        input_sequence[:, drop_index, :, :] = 0
+
+        output_seq = model(input_sequence)
+
+        predicted_latent = output_seq[:, drop_index, :, :]
+        print("predicted and target shape", predicted_latent.shape, target_latent.shape)
+        loss = criterion(predicted_latent, target_latent) # Loss is computed only on the DROPPED frame
+        print("loss: ", loss)
+        loss.backward()
+        optimizer.step()
+        epoch_loss += loss.item()
+        total_batches += 1
+
+    return epoch_loss / total_batches
+
+# phase 2 (alternative): Fine-Tuning on Sequences with Random Drops (multiple frames at a time randome=ly)
+def finetune_lstm_on_dropped_latents_multi_random_loss(model, dataloader, criterion, optimizer, device, loss_percentages=[0, 10, 20, 30, 40, 50, 60, 70, 80]):
     model.train()
     epoch_loss = 0
+    for batch_idx, (features, filepath) in enumerate(dataloader):
+        features = features.to(device)  
+        batch_size, seq_len, latent_dim_height, latent_dim_width = features.shape
 
-    loss_rates = [10, 20, 30, 40, 50, 60]
+        loss_percent = np.random.choice(loss_percentages)
+        num_zeroed_features = int((loss_percent / 100.0) * seq_len)
 
-    for batch_idx, features in enumerate(dataloader):
-        features = features.to(device)
-        target = features.clone()  # Clone the target to avoid accidental modification
+        # print(f"Loss %={loss_percent}%; seq_len={seq_len}; num_zeroed_features={num_zeroed_features}")
+        if num_zeroed_features == 0: 
+            # print("No frames dropped in this batch!")
+            # num_zeroed_features = 1 # NOTE-Option 1: ASSUME at least one frame is always dropped (experiment later if this assumption actually valid)!!!
+            continue # NOTE-Option 2: OR assume that if no frames dropped, then skip the batch and don't compute loss + backpropagate
+    
+        mask = torch.zeros(seq_len, dtype=torch.bool, device=device)   
+        zero_indices = np.random.choice(seq_len, num_zeroed_features, replace=False)
+        mask[zero_indices] = True # shape: [seq_len]
 
-        sequence_length = features.shape[1]
+        mask_expanded = mask.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).expand(batch_size, seq_len, latent_dim_height, latent_dim_width) # `expand_as` converts from [seq_len] to [batch_size, seq_len, 32, 32]
+        input_features = features.clone()   
+        input_features[mask_expanded] = 0
 
-        # -- GRACE-inspired packet loss sampling --
-        if np.random.rand() < 0.8: loss_percentage = 0  # 80% chance it's a clean frame
-        else: loss_percentage = np.random.choice(loss_rates)  # 20% chance, choose from predefined losses
+        # forward pass - execute one step of the model:
+        output_seq = model(input_features)
+        loss = criterion(output_seq, features)  
 
-        # -- Create the mask based on the selected loss percentage --
-        num_zeroed_frames = int((loss_percentage / 100.0) * sequence_length)
+        masked_loss = loss * mask_expanded.float()  # Only compute loss on dropped frames (optional)
+        num_dropped_elements = mask_expanded.float().sum()
+        batch_loss = masked_loss.sum() / num_dropped_elements
+        # print(f"TRAINING: Loss info: original loss shape={loss.shape}; original loss sum={loss.sum()}; masked_loss={masked_loss.sum()}; batch loss={batch_loss.item()}, num_dropped_elements={num_dropped_elements.item()}")
+        optimizer.zero_grad()
+        batch_loss.backward()
+        optimizer.step()    
 
-        # Create mask (zero out exactly `num_zeroed_frames` random frames)
-        mask = torch.zeros(sequence_length, dtype=torch.bool, device=device)
-        if num_zeroed_frames > 0:
+        epoch_loss += batch_loss.item()
+
+    return epoch_loss
+    
+
+def eval_model(model, dataloader, criterion, device, loss_percentage): 
+    """
+    Evaluate the model under a FIXED packet loss rate (GRACE-style evaluation) and compute average loss 
+    only on the dropped frames.
+
+    Args:
+        model (nn.Module): The trained LSTM model.
+        dataloader (DataLoader): DataLoader containing test/validation sequences.
+        criterion (nn.Module): Loss function (e.g., nn.MSELoss(reduction='none')).
+        device (torch.device): 'cuda' or 'cpu'.
+        loss_percentage (float): The fixed packet loss rate (e.g., 10, 20, 30, etc.).
+
+    Returns:
+        float: Average loss over only the dropped (masked) elements across the dataset.
+    """
+    model.eval()
+    epoch_loss, total_dropped_elements = 0, 0
+    with torch.no_grad():
+        for (features, filepath) in dataloader:
+            features = features.to(device)  # Shape: [batch_size, seq_length, height, width]
+            batch_size, sequence_length, latent_dim_height, latent_dim_width = features.shape
+
+            num_zeroed_frames = int((loss_percentage / 100.0) * sequence_length)
+            if num_zeroed_frames == 0:
+                continue  # Skip batches where no loss occurs (SOLE PURPOSE: prevents division by zero)
+
+            mask = torch.zeros(sequence_length, dtype=torch.bool, device=device)
             zero_indices = np.random.choice(sequence_length, num_zeroed_frames, replace=False)
             mask[zero_indices] = True
 
-        # Expand mask to match full feature shape (batch_size, sequence_length, height, width)
-        mask_expanded = mask.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).expand_as(features)
+            mask_expanded = mask.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).expand(batch_size, sequence_length, latent_dim_height, latent_dim_width)
 
-        # Zero out the selected frames in the input
-        input_features = features.clone()
-        input_features[mask_expanded] = 0  # Apply masking (simulated packet loss)
-
-        # Forward pass
-        output_seq = model(input_features)
-
-        # Compute per-frame loss (reduction="none" should give shape [batch_size, sequence_length, height, width])
-        loss = criterion(output_seq, target)
-
-        # Apply mask to the loss so only dropped frames contribute
-        masked_loss = loss * mask_expanded.float()
-
-        if mask_expanded.float().sum() == 0: # Edge case: If the frame was clean (0% loss), skip loss calculation for this batch
-            continue
-
-        # Average loss only over dropped frames (following Grace's focus on corrupted data recovery)
-        loss_value = masked_loss.sum() / mask_expanded.float().sum()
-
-        # Backprop and optimizer step
-        optimizer.zero_grad()
-        loss_value.backward()
-        optimizer.step()
-
-        # Accumulate for epoch average loss
-        epoch_loss += loss_value.item()
-
-    # Average loss over batches
-    average_loss = epoch_loss / len(dataloader)
-    return average_loss
-
-
-def eval_model_masked_loss_only(model, dataloader, criterion, device, loss_percentage): # NOTE: fixed/consistent loss
-    """Evaluate the model under a FIXED packet loss rate (GRACE-style evaluation) and compute avg loss only on dropped frames!"""
-    model.eval()
-    epoch_loss = 0
-    total_elements = 0
-
-    with torch.no_grad():
-        for features in dataloader:
-            features = features.to(device)
-            target = features.clone()
-
-            sequence_length = features.shape[1]
-            num_zeroed_frames = int((loss_percentage / 100.0) * sequence_length)
-
-            mask = torch.zeros(sequence_length, dtype=torch.bool, device=device)
-            if num_zeroed_frames > 0:
-                zero_indices = np.random.choice(sequence_length, num_zeroed_frames, replace=False)
-                mask[zero_indices] = True
-
-            mask_expanded = mask.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).expand_as(features)
             input_features = features.clone()
-            input_features[mask_expanded] = 0 # Apply packet loss mask
+            input_features[mask_expanded] = 0  # Apply packet loss mask
 
+            # Forward pass
             output_seq = model(input_features)
-            loss = criterion(output_seq, target)
 
-            masked_loss = loss * mask_expanded.float()  # Only compute loss on dropped frames (optional)
+            # Compute loss
+            loss = criterion(output_seq, features)  # MSELoss (shape: [batch_size, seq_length, height, width])
 
-            batch_loss = masked_loss.sum() # Sum loss for dropped frames
+            # Apply mask to compute loss only on dropped frames
+            masked_loss = loss * mask_expanded.float()
+
+            # Sum loss only over dropped elements
+            num_dropped = mask_expanded.float().sum()
+
+            batch_loss = masked_loss.sum() / num_dropped
+
+            # print(f"VALIDATION: Loss info: original loss shape={loss.shape}; original loss sum={loss.sum()}; masked_loss={masked_loss.sum()}; batch loss={batch_loss.item()}, num_dropped_elements={num_dropped.item()}")
+            if num_dropped == 0:continue  # Skip batch if no frames were dropped
+
             epoch_loss += batch_loss.item()
-            total_elements += mask_expanded.float().sum().item()
+            # total_dropped_elements += num_dropped.item()
 
-    return epoch_loss / total_elements
+    return epoch_loss # / total_dropped_elements if total_dropped_elements > 0 else 0.0
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Get features of desired model")
-    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_16", "LRAE_VC", "TestNew", "TestNew2", "TestNew3"], 
+    parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC16", "LRAE_VC", "TestNew", "TestNew2", "TestNew3"], 
                         help="Model to train")
     return parser.parse_args()
 
@@ -220,17 +215,16 @@ def plot_train_val_loss(train_losses, val_losses, feature_num):
 if __name__ == "__main__": 
     args = parse_args()
     # Configuration
-    epochs = 160
     if args.model == "PNC":
         input_dim = 32 * 32
         output_dim = 32 * 32
         num_features = 10    
         folder_path = "PNC_combined_features"
-    if args.model == "PNC_16":
+    if args.model == "PNC16":
         input_dim = 32 * 32
         output_dim = 32 * 32
         num_features = 16
-        folder_path = "PNC_16_combined_features"
+        folder_path = "PNC16_combined_features"
     if args.model == "LRAE_VC":
         input_dim = 28 * 28
         output_dim = 28 * 28
@@ -252,6 +246,9 @@ if __name__ == "__main__":
         num_features = 24    
         folder_path = "TestNew3_combined_features"
 
+
+    # Hyperparameters
+    epochs = 100
     batch_size = 1
     hidden_dim = 128  # Tuned hyperparameter for LSTM
     num_layers = 2
@@ -270,6 +267,14 @@ if __name__ == "__main__":
         criterion = nn.MSELoss(reduction='none') 
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         dataset = CustomDataset(folder_path, i)
+
+        ##### NOTE: DEBUG #####
+        # print(f"Total number of samples in the dataset: {len(dataset)}")
+        # print
+        # for i in range(min(3, len(dataset))):  # Print the first 3 samples or less if the dataset is smaller
+        #     sample, filepath = dataset[i]
+        #     print(f"Sample {i} shape: {sample.shape}")
+        ##### END DEBUG #####
         
         # Shuffle dataset indices and create splits: 82% train, 8% validation, 10% test
         all_indices = list(range(len(dataset)))
@@ -296,14 +301,15 @@ if __name__ == "__main__":
 
         for epoch in range(epochs):
             # TRAINING PHASE
-            # train_loss = train_model(model, train_dataloader, criterion, optimizer, device) # NOTE: to use train_model()
-            train_loss = train_model_grace_loss(model, train_dataloader, criterion, optimizer, device) # NOTE: to use train_model_with_mask()
+            pretrain_loss = pretrain_lstm_on_complete_sequences(model, train_dataloader, criterion, optimizer, device)
+            print(f"[Feature {i}] Epoch {epoch}, Pretrain Loss (no feature packet drops): {pretrain_loss:.4f}")
+            train_loss = finetune_lstm_on_dropped_latents_multi_random_loss(model, train_dataloader, criterion, optimizer, device)
             print(f"[Feature {i}] Epoch {epoch}, Training Loss: {train_loss:.4f}")
             train_losses.append(train_loss)
             
             # VALIDATION PHASE
             # val_loss = evaluate_model(model, val_dataloader, criterion, device)
-            val_loss = eval_model_masked_loss_only(model=model, dataloader=test_dataloader, criterion=criterion, device=device, loss_percentage=30)
+            val_loss = eval_model(model=model, dataloader=test_dataloader, criterion=criterion, device=device, loss_percentage=30)
             print(f"[Feature {i}] Epoch {epoch}, Validation Loss: {val_loss:.4f}")
             val_losses.append(val_loss)
             
@@ -321,7 +327,7 @@ if __name__ == "__main__":
 
         # TESTING PHASE
         # test_loss = evaluate_model(model, test_dataloader, criterion, device)
-        test_loss = eval_model_masked_loss_only(model=model, dataloader=test_dataloader, criterion=criterion, device=device, loss_percentage=30)
+        test_loss = eval_model(model=model, dataloader=test_dataloader, criterion=criterion, device=device, loss_percentage=30)
         print(f"[Feature {i}] Final Test Loss: {test_loss:.4f}")
 
 
