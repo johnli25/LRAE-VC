@@ -216,6 +216,8 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
             torch.save(ae_model.state_dict(), f"{model_name}_post_drop_fill_best_validation.pth")
             print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
 
+        print(f"Epoch [{epoch+1}/{num_epochs}]: Train loss: {train_loss}, Validation loss: {val_loss}")
+
     plot_train_val_loss(train_losses, val_losses)
 
     test_loss = evaluate(model=ae_model, dataloader=test_loader, criterion=criterion, device=device, loss_percent=0)
@@ -286,7 +288,7 @@ if __name__ == "__main__":
         transforms.ToTensor(),
     ])
 
-    dataset = DummyVideoDataset(path, transform=transform)
+    dataset = VideoDataset(path, transform=transform)
     test_indices = [
         i for i in range(len(dataset.video_ids))
         if dataset.video_ids[i] in test_img_names
@@ -369,5 +371,5 @@ if __name__ == "__main__":
                 output_frame = outputs[i]  # Shape: [3, H, W]
                 # Permute to [H, W, 3] and convert to numpy array
                 output_np = output_frame.permute(1, 2, 0).cpu().numpy()
-                filename = f"{video_id[0].strip()}_frame_{i}.png"
+                filename = f"{video_id[0].strip()}_{i}.png"
                 plt.imsave(os.path.join(output_path, filename), output_np)
