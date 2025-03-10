@@ -212,7 +212,7 @@ if __name__ == "__main__":
 
     ## Hyperparameters
     num_epochs = 28
-    batch_size = 1
+    batch_size = 32
     learning_rate = 1e-3
     img_height, img_width = 224, 224 # NOTE: Dependent on autoencoder architecture!!
     path = "UCF_224x224x3_PNC_FrameCorr_input_imgs/" # NOTE: already resized to 224x224 (so not really adaptable), but faster
@@ -253,7 +253,7 @@ if __name__ == "__main__":
     val_dataset.dataset.transform = transform        
     test_dataset.dataset.transform = transform
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 

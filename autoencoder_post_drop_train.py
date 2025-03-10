@@ -87,6 +87,54 @@ class VideoDataset(Dataset):
         return video_tensor, video_id # (video_tensor, video filename)
     
 
+class DummyVideoDataset(Dataset):
+    def __init__(self, img_dir, seq_len=32, transform=None):
+        """
+        Args:
+            img_dir (str): Path to the directory containing image files.
+            seq_len (int): Number of frames per video sequence.
+            transform (callable, optional): Transform to apply to each image.
+        """
+        self.img_dir = img_dir
+        self.seq_len = seq_len
+        self.transform = transform
+        # List all image files (adjust extensions as needed)
+        self.img_names = os.listdir(img_dir)
+        
+        self.video_dict = {}
+        for filename in self.img_names:
+            # assume the video name is everything before the last underscore
+            # e.g., "diving_7.jpg" -> video id: "diving"
+            video_id = "_".join(filename.split("_")[:-1])
+            if video_id not in self.video_dict:
+                self.video_dict[video_id] = []
+            self.video_dict[video_id].append(filename)
+        
+        self.video_ids = list(self.video_dict.keys())
+        print(self.video_ids)
+
+    def __len__(self):
+        # You can define the length arbitrarily.
+        # Here, we return the number of sequences we can get from the total images.
+        # For example, if there are 320 images and seq_len is 32, then we have 10 samples.
+        return len(self.img_names) // self.seq_len
+
+    def __getitem__(self, idx):
+        # Instead of grouping by video, we randomly sample `seq_len` images from the entire image pool.
+        sampled_names = np.random.choice(self.img_names, self.seq_len, replace=False)
+        frames = []
+        for file in sampled_names:
+            img_path = os.path.join(self.img_dir, file)
+            image = Image.open(img_path).convert("RGB")
+            if self.transform:
+                image = self.transform(image)
+            frames.append(image)
+        # Stack frames into a video tensor: shape [seq_len, C, H, W]
+        video_tensor = torch.stack(frames, dim=0)
+        video_id = f"dummy_video_{idx}"  # Dummy video ID
+        return video_tensor, video_id
+
+
 
 def plot_train_val_loss(train_losses, val_losses):
     epochs = range(1, len(train_losses) + 1)
@@ -225,7 +273,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     ## Hyperparameters
-    num_epochs = 28
+    num_epochs = 40
     batch_size = 1 # NOTE: set to 1 because each sample is a full video sequence and videos may have different number of frames/sequence lengths
     learning_rate = 1e-3
     img_height, img_width = 224, 224 # NOTE: Dependent on autoencoder architecture!!
@@ -238,9 +286,9 @@ if __name__ == "__main__":
         transforms.ToTensor(),
     ])
 
-    dataset = VideoDataset(path, transform=transform)
+    dataset = DummyVideoDataset(path, transform=transform)
     test_indices = [
-        i for i in range(len(dataset))
+        i for i in range(len(dataset.video_ids))
         if dataset.video_ids[i] in test_img_names
     ]
     train_val_indices = [i for i in range(len(dataset)) if i not in test_indices]
