@@ -248,7 +248,7 @@ if __name__ == "__main__":
 
 
     # Hyperparameters
-    epochs = 100
+    epochs = 120
     batch_size = 1
     hidden_dim = 128  # Tuned hyperparameter for LSTM
     num_layers = 2
