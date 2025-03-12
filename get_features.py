@@ -64,6 +64,7 @@ def process_and_save_features(model, dataloader, output_folder, device):
     # NOTE: Not necessary but nice to have: Combine and save grouped features
     for prefix, feature_list in grouped_features.items():
         combined_features = np.stack(feature_list, axis=0)  # Combine features
+        print("combined_features shape:", combined_features.shape)
         output_file = os.path.join(output_folder, f"{prefix}_combined.npy")
         np.save(output_file, combined_features)
         print(f"Saved combined features for prefix '{prefix}' to '{output_file}'")

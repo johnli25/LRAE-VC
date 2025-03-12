@@ -37,7 +37,6 @@ def get_labels_from_filename(filenames):
 class ImageDataset(Dataset):
     def __init__(self, img_dir, transform=None):
         self.img_dir = img_dir
-        self.gt_dir = img_dir
         self.transform = transform
         self.img_names = os.listdir(img_dir)
 
@@ -46,19 +45,15 @@ class ImageDataset(Dataset):
 
     def __getitem__(self, idx):
         img_path = os.path.join(self.img_dir, self.img_names[idx])
-        gt_path = os.path.join(self.gt_dir, self.img_names[idx])
-
         image = Image.open(img_path).convert("RGB")
-        ground_truth = Image.open(gt_path).convert("RGB")
-
+        
         if self.transform:
             image = self.transform(image)
-            ground_truth = self.transform(ground_truth)
+            
+        # Use the same image for both input and ground truth
+        return image, image, self.img_names[idx]  # (image, same_image_as_ground_truth, img filename)
 
-        return image, ground_truth, self.img_names[idx] # (image, ground_truth_image, img filename)
 
-
-# for PNC and tail dropouts
 def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []

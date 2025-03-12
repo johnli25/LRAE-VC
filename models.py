@@ -689,6 +689,7 @@ class FrameSequenceLSTM(nn.Module):
         """
         # Reshape input from [batch_size, sequence_length, 32, 32] -> [batch_size, sequence_length, 1024]
         batch_size, sequence_length, height, width = x.shape
+        
         x = x.view(batch_size, sequence_length, -1)  # Flatten spatial dimensions
         
         # Initialize LSTM hidden and cell states

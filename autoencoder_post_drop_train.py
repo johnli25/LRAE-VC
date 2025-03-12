@@ -25,6 +25,9 @@ test_img_names = {
 # NOTE: uncomment below if you're using UCF101
 
 
+video_features_lookup = {}
+
+
 # Preload + cache LSTM models to avoid reloading them in the loop
 lstm_models = {}
 input_dim = 1024      # e.g., flattened spatial dims from [32, 32]
@@ -43,7 +46,6 @@ for filepath in os.listdir("features_num_directory"):
         model_instance.load_state_dict(state_dict)
         model_instance.eval()  # Set to eval mode
         lstm_models[feature_idx] = model_instance
-
 
 # Dataset class for loading images and ground truths
 class VideoDataset(Dataset):
@@ -135,6 +137,26 @@ class DummyVideoDataset(Dataset):
         return video_tensor, video_id
 
 
+class ImageDataset(Dataset):
+    def __init__(self, img_dir, transform=None):
+        self.img_dir = img_dir
+        self.transform = transform
+        self.img_names = os.listdir(img_dir)
+
+    def __len__(self):
+        return len(self.img_names)
+
+    def __getitem__(self, idx):
+        img_path = os.path.join(self.img_dir, self.img_names[idx])
+        image = Image.open(img_path).convert("RGB")
+        
+        if self.transform:
+            image = self.transform(image)
+            
+        # Use the same image for both input and ground truth
+        return image, image, self.img_names[idx]  # (image, same_image_as_ground_truth, img filename)
+
+
 
 def plot_train_val_loss(train_losses, val_losses):
     epochs = range(1, len(train_losses) + 1)
@@ -162,67 +184,64 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
         ae_model.train()
         train_loss, total_frames = 0.0, 0
 
-        for video_tensor, video_id in train_loader:
-            # print("video_tensor shape and video id:", video_tensor.shape, video_id)
-            video_tensor = video_tensor.to(device)
-            # NOTE: AE_model treats sequence_length as batch size --> "remove" phanton batch dim and pass directly into ae_model
-            video_tensor = video_tensor.squeeze(0) # shape: (seq_len, 3, H, W)
-            latent = ae_model.encode(video_tensor) # squeeze by 0 to get first video in the batch since video_tensor's shape is (1, seq_len, 3, H, W) --> (seq_len, 3, H, W)
-            batch_size_seqlen, feature_maps, height, width = latent.shape
+        for inputs, targets, filename in train_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            filename = filename[0] # NOTE: filename is a tuple containing strings of size batch_size (which is set to 1)
+            video_id = "_".join(filename.split("_")[:-1])    
+            frame_num = int(filename.split("_")[-1].split(".")[0]) # removes ".jpg" and everything before the frame number (action + video num)
+            video_features = torch.tensor(video_features_lookup[video_id]).to(device)
+            print(f"filename: {filename}, video_features.shape: {video_features.shape}")
 
-            # Random, Grace-style drop:
-            loss_percent = 0 # np.random.choice(loss_percentages)
-            num_zeroed = int((loss_percent / 100) * feature_maps)
-
-            mask = torch.zeros(feature_maps, dtype=torch.bool, device=device) # shape: (feature_maps,)
-            zero_indices = np.random.choice(feature_maps, num_zeroed, replace=False)
-            mask[zero_indices] = True
-
-            mask_expanded = mask.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).expand(batch_size_seqlen, -1, height, width) # shape: (batch_size, feature_maps, height, width)
-            latent_dropped_then_fill = latent.clone()
-            latent_dropped_then_fill[mask_expanded] = 0 # shape (batch_size/sequence length, feature_maps, height, width)
+            seq_len, feature_dim = video_features.shape[0], video_features.shape[1]
+            loss_percent = np.random.choice(loss_percentages)
+            num_zeroed_features = int((loss_percent / 100.0) * feature_dim)
+            zero_indices = np.random.choice(feature_dim, num_zeroed_features, replace=False)
+            print("loss_percent and zero_indices", loss_percent, zero_indices)
+            latent = ae_model.encode(inputs)
+            print("latent shape", latent.shape)
             for feature_idx in zero_indices:
-                # For each dropped feature in latent_dropped_then_fill, impute using the corresponding LSTM.
-                dropped_feature_sequence = latent_dropped_then_fill[:, feature_idx, :, :].clone() # Shape: [seq_length, H, W]
-
-                # Load the corresponding pretrained LSTM model from our preloaded dictionary:
+                # zero out the latent feature for the current frame
+                video_features[frame_num, feature_idx, :, :] = 0
+                # pass this into lstm_model 
+                dropped_feature_sequence = video_features[:, feature_idx, :, :].clone()
+                print("dropped feature sequence:", dropped_feature_sequence.shape)
                 lstm_feature_model = lstm_models[feature_idx].to(device)
-                lstm_feature_model.eval()
-
                 with torch.no_grad():
-                    predicted_feature = lstm_feature_model(dropped_feature_sequence.unsqueeze(0)) # output shape is [1, seq_length, H, W]
+                    predicted_feature = lstm_feature_model(dropped_feature_sequence.unsqueeze(0))
 
-                # Replace the dropped feautre in latent_dropped with the LSTM prediction
-                latent_dropped_then_fill[:, feature_idx, :, :] = predicted_feature.squeeze(0)
 
-            # Decode the latent representation
-            outputs = ae_model.decode(latent_dropped_then_fill)
-            loss = criterion(outputs, video_tensor)
+
             optimizer.zero_grad()
+            outputs = model(inputs) 
+            loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
 
-            train_loss += loss.item() * video_tensor.size(0) 
+            train_loss += loss.item() * inputs.size(0)
 
         train_loss /= len(train_loader.dataset)
         train_losses.append(train_loss)
 
-        val_loss = evaluate(model=ae_model, dataloader=val_loader, criterion=criterion, device=device, loss_percent=0)
+        # Validate the model
+        val_loss = evaluate(model, val_loader, criterion, device, max_tail_length)
         val_losses.append(val_loss)
 
-        # save best model checkpoint
+        # Save the best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(ae_model.state_dict(), f"{model_name}_post_drop_fill_best_validation.pth")
+            torch.save(model.state_dict(), f"{model_name}_post_drop_fill_best_validation.pth")
             print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
 
-        print(f"Epoch [{epoch+1}/{num_epochs}]: Train loss: {train_loss}, Validation loss: {val_loss}")
+        print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
     plot_train_val_loss(train_losses, val_losses)
 
-    test_loss = evaluate(model=ae_model, dataloader=test_loader, criterion=criterion, device=device, loss_percent=0)
-    print(f"Final test loss: {test_loss}")
+    # Save final model
+    torch.save(model.state_dict(), f"{model_name}_post_drop_fill_final.pth")
 
+    # Final Test: test_autoencoder()
+    test_loss = evaluate(model, test_loader, criterion, device, max_tail_length)
+    print(f"Final Test Loss: {test_loss:.4f}")
 
 
 def evaluate(model, dataloader, criterion, device, loss_percent):
@@ -272,7 +291,10 @@ if __name__ == "__main__":
         parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_256U", "PNC16", "TestNew", "TestNew2", "TestNew3", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
                             help="Model to train")
         return parser.parse_args()
+
     args = parse_args()
+
+
 
     ## Hyperparameters
     num_epochs = 40
@@ -284,14 +306,14 @@ if __name__ == "__main__":
 
     # Data loading
     transform = transforms.Compose([
-        transforms.Resize((img_height, img_width)),
+        # transforms.Resize((img_height, img_width)),
         transforms.ToTensor(),
     ])
 
-    dataset = VideoDataset(path, transform=transform)
+    dataset = ImageDataset(path, transform=transform)
     test_indices = [
-        i for i in range(len(dataset.video_ids))
-        if dataset.video_ids[i] in test_img_names
+        i for i in range(len(dataset))
+        if "_".join(dataset.img_names[i].split("_")[:-1]) in test_img_names
     ]
     train_val_indices = [i for i in range(len(dataset)) if i not in test_indices]
 
@@ -326,15 +348,17 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     max_tail_length = None
+    video_features_dir = None
     if args.model == "PNC":
         model = PNC_Autoencoder().to(device)
-        max_tail_length = 10 # true PNC
+        max_tail_length = 10 # NOTE: true PNC
 
     if args.model == "PNC_256U":
         model = PNC_256Unet_Autoencoder().to(device)
 
     if args.model == "PNC16":
         model = PNC16().to(device)
+        video_features_dir = "PNC16_combined_features/"
 
     if args.model == "TestNew":
         model = TestNew().to(device)
@@ -345,31 +369,30 @@ if __name__ == "__main__":
     if args.model == "TestNew3":
         model = TestNew3().to(device)
 
+    # NOTE: Preload + cache Video features:
+    for filename in os.listdir(video_features_dir):
+        video_id = "_".join(filename.split("_")[:-1])
+        video_features_lookup[video_id] = np.load(os.path.join(video_features_dir, filename))
+
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
     train(ae_model=model, train_loader=train_loader, val_loader=val_loader, test_loader=test_loader, criterion=criterion, optimizer=optimizer, device=device, num_epochs=num_epochs, model_name=args.model)
 
     # Save images generated by DECODER ONLY! 
-    output_path = "post_train_test_imgs_output_w_LSTM/"
+    output_path = "LSTM_output_test_imgs_post_train/"
     if not os.path.exists(output_path):
         print(f"Creating directory: {output_path}")
         os.makedirs(output_path)
 
-    model.eval()  # Put the autoencoder model in eval mode
+    model.eval()  # Put the autoencoder in eval mode
     with torch.no_grad():
-        for video_tensor, video_id in test_loader:
-            # video_tensor has shape [1, seq_len, 3, H, W]
-            video_tensor = video_tensor.to(device)
-            # Remove the phantom batch dimension so that the shape is [seq_len, 3, H, W]
-            video_tensor = video_tensor.squeeze(0)
-            # Pass the video through the autoencoder (or your evaluation pipeline)
-            outputs = model(video_tensor)  # Assuming model returns [seq_len, 3, H, W]
-            print(f"Processing video: {video_id[0].strip()}, outputs shape: {outputs.shape}")
+        for i, (inputs, _, filenames) in enumerate(test_loader):
+            inputs = inputs.to(device)
+            outputs = model(inputs)  # Forward pass through autoencoder
+            print("Outputs shape:", outputs.shape)
 
-            # Loop over each frame in the video
-            for i in range(outputs.size(0)):
-                output_frame = outputs[i]  # Shape: [3, H, W]
-                # Permute to [H, W, 3] and convert to numpy array
-                output_np = output_frame.permute(1, 2, 0).cpu().numpy()
-                filename = f"{video_id[0].strip()}_{i}.png"
-                plt.imsave(os.path.join(output_path, filename), output_np)
+            # outputs is (batch_size, 3, image_h, image_w)
+            # Save each reconstructed image
+            for j in range(inputs.size(0)):
+                output_np = outputs[j].permute(1, 2, 0).cpu().numpy()  # (image_h, image_w, 3)
+                plt.imsave(os.path.join(output_path, filenames[j]), output_np)
