@@ -177,7 +177,7 @@ def plot_train_val_loss(train_losses, val_losses):
 def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
-    loss_percentages=[10, 20, 30, 40, 50, 60, 70, 80]
+    loss_percentages=[0, 10, 20, 30, 40, 50, 60, 70, 80]
 
     for epoch in range(num_epochs):
         # Train the model
@@ -188,31 +188,37 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
             inputs, targets = inputs.to(device), targets.to(device)
             filename = filename[0] # NOTE: filename is a tuple containing strings of size batch_size (which is set to 1)
             video_id = "_".join(filename.split("_")[:-1])    
-            frame_num = int(filename.split("_")[-1].split(".")[0]) # removes ".jpg" and everything before the frame number (action + video num)
+            frame_num = int(filename.split("_")[-1].split(".")[0]) - 1 # removes ".jpg" and everything before the frame number (action + video num). ALSO, frame num is 1-indexed.
             video_features = torch.tensor(video_features_lookup[video_id]).to(device)
-            print(f"filename: {filename}, video_features.shape: {video_features.shape}")
+            # print(f"filename: {filename}, video_features.shape: {video_features.shape}")
 
             seq_len, feature_dim = video_features.shape[0], video_features.shape[1]
             loss_percent = np.random.choice(loss_percentages)
             num_zeroed_features = int((loss_percent / 100.0) * feature_dim)
-            zero_indices = np.random.choice(feature_dim, num_zeroed_features, replace=False)
-            print("loss_percent and zero_indices", loss_percent, zero_indices)
+            # zero_indices = np.random.choice(feature_dim, num_zeroed_features, replace=False)
+            zero_indices = np.random.choice(feature_dim, 0, replace=False)
+
+            # print("loss_percent and zero_indices", loss_percent, zero_indices)
             latent = ae_model.encode(inputs)
-            print("latent shape", latent.shape)
+            latent_mod = latent.clone()
+
+            optimizer.zero_grad() # clear/zero out gradients 
+
+            # print("latent shape", latent_mod.shape)
             for feature_idx in zero_indices:
                 # zero out the latent feature for the current frame
-                video_features[frame_num, feature_idx, :, :] = 0
+                video_features[frame_num, feature_idx, :, :] = 0 # NOTE: b/c feature_idx is 1-indexed
                 # pass this into lstm_model 
-                dropped_feature_sequence = video_features[:, feature_idx, :, :].clone()
-                print("dropped feature sequence:", dropped_feature_sequence.shape)
-                lstm_feature_model = lstm_models[feature_idx].to(device)
+                dropped_feature_sequence = video_features[:, feature_idx, :, :].clone() # shape: (seq_len, height, width)
+                # print("dropped feature sequence:", dropped_feature_sequence.shape) 
+                lstm_feature_model = lstm_models[feature_idx]
                 with torch.no_grad():
-                    predicted_feature = lstm_feature_model(dropped_feature_sequence.unsqueeze(0))
+                    predicted_feature = lstm_feature_model(dropped_feature_sequence.unsqueeze(0)) # shape: (1, seq_len, height, width)
+                    print("predicted_feature shape:", predicted_feature.shape) 
 
+                latent_mod[:, feature_idx, :, :] = predicted_feature.squeeze(0)[frame_num].unsqueeze(0)
 
-
-            optimizer.zero_grad()
-            outputs = model(inputs) 
+            outputs = ae_model.decode(latent_mod)
             loss = criterion(outputs, targets)
             loss.backward()
             optimizer.step()
@@ -223,13 +229,13 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
         train_losses.append(train_loss)
 
         # Validate the model
-        val_loss = evaluate(model, val_loader, criterion, device, max_tail_length)
+        val_loss = evaluate(model=ae_model, dataloader=val_loader, criterion=criterion, device=device, loss_percent=0)
         val_losses.append(val_loss)
 
         # Save the best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), f"{model_name}_post_drop_fill_best_validation.pth")
+            torch.save(ae_model.state_dict(), f"{model_name}_post_drop_fill_best_validation.pth")
             print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
@@ -237,10 +243,10 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
     plot_train_val_loss(train_losses, val_losses)
 
     # Save final model
-    torch.save(model.state_dict(), f"{model_name}_post_drop_fill_final.pth")
+    torch.save(ae_model.state_dict(), f"{model_name}_post_drop_fill_final.pth")
 
     # Final Test: test_autoencoder()
-    test_loss = evaluate(model, test_loader, criterion, device, max_tail_length)
+    test_loss = evaluate(model=ae_model, dataloader=test_loader, criterion=criterion, device=device, loss_percent=0)
     print(f"Final Test Loss: {test_loss:.4f}")
 
 
@@ -248,38 +254,43 @@ def evaluate(model, dataloader, criterion, device, loss_percent):
     model.eval()
     test_loss = 0
     with torch.no_grad():
-        for video_tensor, video_id in dataloader:
-            video_tensor = video_tensor.to(device)
-            video_tensor = video_tensor.squeeze(0)
-            latent = model.encode(video_tensor)
-            batch_size_seqlen, feature_maps, height, width = latent.shape
+       for inputs, targets, filename in train_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            filename = filename[0] # NOTE: filename is a tuple containing strings of size batch_size (which is set to 1)
+            video_id = "_".join(filename.split("_")[:-1])    
+            frame_num = int(filename.split("_")[-1].split(".")[0]) - 1 # removes ".jpg" and everything before the frame number (action + video num). ALSO, frame num is 1-indexed.
+            video_features = torch.tensor(video_features_lookup[video_id]).to(device)
+            # print(f"filename: {filename}, video_features.shape: {video_features.shape}")
 
-            # drop by loss_percent (passed as input argument)
-            num_zeroed = int((loss_percent / 100) * feature_maps)
-            if num_zeroed > 0:
-                mask = torch.zeros(feature_maps, dtype=torch.bool, device=device)
-                zero_indices = np.random.choice(feature_maps, num_zeroed, replace=False)
-                mask[zero_indices] = True
+            seq_len, feature_dim = video_features.shape[0], video_features.shape[1]
+            num_zeroed_features = int((loss_percent / 100.0) * feature_dim)
+            # zero_indices = np.random.choice(feature_dim, num_zeroed_features, replace=False)
+            zero_indices = np.random.choice(feature_dim, 0, replace=False)
+            # print("zero_indices:", zero_indices)
+            # print("loss_percent and zero_indices", loss_percent, zero_indices)
+            latent = model.encode(inputs)
+            latent_mod = latent.clone()
 
-                mask_expanded = mask.unsqueeze(0).unsqueeze(-1).unsqueeze(-1).expand(batch_size_seqlen, -1, height, width)
-                latent_dropped_then_fill = latent.clone()
-                latent_dropped_then_fill[mask_expanded] = 0
+            optimizer.zero_grad() # clear/zero out gradients 
 
-                for feature_idx in zero_indices:
-                    dropped_feature_sequence = latent_dropped_then_fill[:, feature_idx, :, :].clone()
-                    lstm_feature_model = lstm_models[feature_idx].to(device)
-                    lstm_feature_model.eval()
+            # print("latent shape", latent_mod.shape)
+            for feature_idx in zero_indices:
+                # zero out the latent feature for the current frame
+                video_features[frame_num, feature_idx, :, :] = 0 # NOTE: b/c feature_idx is 1-indexed
+                # pass this into lstm_model 
+                dropped_feature_sequence = video_features[:, feature_idx, :, :].clone() # shape: (seq_len, height, width)
+                # print("dropped feature sequence:", dropped_feature_sequence.shape) 
+                lstm_feature_model = lstm_models[feature_idx]
+                with torch.no_grad():
+                    predicted_feature = lstm_feature_model(dropped_feature_sequence.unsqueeze(0)) # shape: (1, seq_len, height, width)
+                    print("predicted_feature shape:", predicted_feature.shape) 
 
-                    with torch.no_grad():
-                        predicted_feature = lstm_feature_model(dropped_feature_sequence.unsqueeze(0))
+                latent_mod[:, feature_idx, :, :] = predicted_feature.squeeze(0)[frame_num].unsqueeze(0)
 
-                    latent_dropped_then_fill[:, feature_idx, :, :] = predicted_feature.squeeze(0)
-            else:
-                latent_dropped_then_fill = latent
+            outputs = model.decode(latent_mod)
+            loss = criterion(outputs, targets)
+            test_loss += loss.item() * inputs.size(0) # where inputs.size(0) is the BATCH size
 
-            outputs = model.decode(latent_dropped_then_fill)
-            loss = criterion(outputs, video_tensor)
-            test_loss += loss.item() * video_tensor.size(0)
 
     return test_loss / len(dataloader.dataset) 
 
@@ -297,7 +308,7 @@ if __name__ == "__main__":
 
 
     ## Hyperparameters
-    num_epochs = 40
+    num_epochs = 30
     batch_size = 1 # NOTE: set to 1 because each sample is a full video sequence and videos may have different number of frames/sequence lengths
     learning_rate = 1e-3
     img_height, img_width = 224, 224 # NOTE: Dependent on autoencoder architecture!!
