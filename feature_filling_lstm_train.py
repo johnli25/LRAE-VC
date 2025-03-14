@@ -88,11 +88,11 @@ def finetune_lstm_on_dropped_latents_single(model, dataloader, criterion, optimi
 
     return epoch_loss / total_batches
 
-# phase 2 (alternative): Fine-Tuning on Sequences with Random Drops (multiple frames at a time randome=ly)
-def finetune_lstm_on_dropped_latents_multi_random_loss(model, dataloader, criterion, optimizer, device, loss_percentages=[0, 10, 20, 30, 40, 50, 60, 70, 80]):
+# phase 2 (alternative): Fine-Tuning on Sequences with Random Drops (multiple frames at a time randomly)
+def finetune_lstm_on_dropped_latents_multi_random_loss(model, dataloader, criterion, optimizer, device, loss_percentages=[0, 10, 20, 30, 40, 50, 60, 70, 80, 90]):
     model.train()
     epoch_loss = 0
-    for batch_idx, (features, filepath) in enumerate(dataloader):
+    for batch_idx, (features, filepath) in enumerate(dataloader): # NOTE: this loops thru every frame(s' features)!
         features = features.to(device)  
         batch_size, seq_len, latent_dim_height, latent_dim_width = features.shape
 
