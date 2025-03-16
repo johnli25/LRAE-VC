@@ -51,7 +51,7 @@ class ImageDataset(Dataset):
             image = self.transform(image)
             
         # Use the same image for both input and ground truth
-        return image, image, self.img_names[idx]  # (image, same_image_as_ground_truth, img filename)
+        return image, self.img_names[idx]  # (image, same_image_as_ground_truth, img filename)
 
 
 def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length):
@@ -62,15 +62,16 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
         # Train the model
         model.train()
         train_loss = 0
-        for inputs, targets, _ in train_loader:
+        for inputs, _ in train_loader:
             # Sample a single tail length for the batch
-            torch.manual_seed(seed=42)
-            tail_len = torch.randint(0, max_tail_length + 1, (1,)).item() if max_tail_length else None
-            inputs, targets = inputs.to(device), targets.to(device)
+            # torch.manual_seed(seed=42)
+            tail_len = torch.randint(0, max_tail_length, (1,)).item() if max_tail_length else None
+
+            inputs = inputs.to(device)
 
             optimizer.zero_grad()
             outputs = model(inputs, tail_len) 
-            loss = criterion(outputs, targets)
+            loss = criterion(outputs, inputs)
             loss.backward()
             optimizer.step()
 
@@ -95,7 +96,9 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
     plot_train_val_loss(train_losses, val_losses)
 
     # Save final model
-    if max_tail_length: torch.save(model.state_dict(), f"{model_name}_final_w_random_drops.pth")
+    if max_tail_length: 
+        torch.save(model.state_dict(), f"{model_name}_final_w_random_drops.pth")
+        print(f"Final model saved as {model_name}_final_w_random_drops.pth")
     else: torch.save(model.state_dict(), f"{model_name}_final_no_dropouts.pth")
 
     # Final Test: test_autoencoder()
@@ -107,12 +110,13 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length):
     model.eval()
     test_loss = 0
     with torch.no_grad():
-        for inputs, targets, _ in dataloader:
-            torch.manual_seed(seed=42)
-            tail_len = torch.randint(0, max_tail_length + 1, (1,)).item() if max_tail_length else None
-            inputs, targets = inputs.to(device), targets.to(device)
+        for inputs, _ in dataloader:
+            # torch.manual_seed(seed=42)
+            tail_len = torch.randint(0, max_tail_length, (1,)).item() if max_tail_length else None
+            # print("Eval tail length: ", tail_len)
+            inputs = inputs.to(device)
             outputs = model(inputs, tail_len) 
-            loss = criterion(outputs, targets)
+            loss = criterion(outputs, inputs)
             test_loss += loss.item() * inputs.size(0)
 
     return test_loss / len(dataloader.dataset)
@@ -202,11 +206,13 @@ if __name__ == "__main__":
         parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
         parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_256U", "PNC16", "TestNew", "TestNew2", "TestNew3", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
                             help="Model to train")
+        parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
+        parser.add_argument("--epochs", type=int, default=100, help="Number of epochs to train")
         return parser.parse_args()
     args = parse_args()
 
     ## Hyperparameters
-    num_epochs = 28
+    num_epochs = args.epochs
     batch_size = 32
     learning_rate = 1e-3
     img_height, img_width = 224, 224 # NOTE: Dependent on autoencoder architecture!!
@@ -266,6 +272,7 @@ if __name__ == "__main__":
 
     if args.model == "PNC16":
         model = PNC16().to(device)
+        # max_tail_length = 16 # NOTE: max_tail_length is slightly misleading: it's actually the number of channels to drop out (no tail technically )
 
     if args.model == "TestNew":
         model = TestNew().to(device)
@@ -275,6 +282,11 @@ if __name__ == "__main__":
 
     if args.model == "TestNew3":
         model = TestNew3().to(device)
+
+    # if args.model_path exists, load and continue training or evaluate from there
+    if args.model_path:
+        print(f"Loading model weights from {args.model_path}")
+        model.load_state_dict(torch.load(args.model_path, map_location=device))
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
@@ -337,10 +349,10 @@ if __name__ == "__main__":
     else: # no classification! --> testing Reconstruction ONLY
         model.eval()  # Put the autoencoder in eval mode
         with torch.no_grad():
-            for i, (inputs, _, filenames) in enumerate(test_loader):
+            for i, (inputs, filenames) in enumerate(test_loader):
                 inputs = inputs.to(device)
-                outputs = model(inputs)  # Forward pass through autoencoder
-                print("Outputs shape:", outputs.shape)
+                num_dropped_features = 0 # NOTE: John, you manually set this constant during experimentation/evaluation? 
+                outputs = model(inputs, num_dropped_features)  # Forward pass through autoencoder
 
                 # outputs is (batch_size, 3, image_h, image_w)
                 # Save each reconstructed image

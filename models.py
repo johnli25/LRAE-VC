@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np
 import random 
 
 class PNC_Autoencoder(nn.Module):
@@ -100,13 +101,24 @@ class PNC16(nn.Module):
     def forward(self, x, tail_length=None):
         # Encoder
         x2 = self.encode(x)  # (3, 224, 224) -> (16, 32, 32)
-        # print("encoded x2 shape: ", x2.shape)
         if tail_length is not None:
             # Zero out tail features for all samples in the batch
             batch_size, channels, _, _ = x2.size()
             tail_start = channels - tail_length
+            print(f"tail_len = {tail_length}; tail_start = {tail_start}")
             x2 = x2.clone()  # Create a copy of the tensor to avoid in-place operations!
             x2[:, tail_start:, :, :] = 0
+
+        # if num_dropped_features is not None and num_dropped_features > 0:
+        #     batch_size, channels, _, _ = x2.size()
+        #     num_dropped_features = min(num_dropped_features, channels)  # Ensure we don’t drop more than available
+            
+        #     # Randomly select `num_dropped_features` indices to zero out
+        #     drop_indices = np.random.choice(channels, num_dropped_features, replace=False)
+        #     # print(f"num_dropped_features/tail_length: {num_dropped_features},  ---   drop_indices: {drop_indices}")
+            
+        #     x2 = x2.clone() # Clone tensor before modifying
+        #     x2[:, drop_indices, :, :] = 0  # Zero out randomly selected channels
 
         # Decoder
         y5 = self.decode(x2)  # (16, 32, 32) -> (3, 224, 224)

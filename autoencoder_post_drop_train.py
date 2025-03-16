@@ -201,7 +201,6 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
             latent = ae_model.encode(inputs)
             latent_mod = latent.clone()
 
-            optimizer.zero_grad() # clear/zero out gradients 
 
             # print("latent shape", latent_mod.shape)
             ##### DEBUG CHECK if any latent features have all 0s #####
@@ -224,6 +223,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
 
                 latent_mod[:, feature_idx, :, :] = predicted_feature.squeeze(0)[frame_num].unsqueeze(0)
 
+            optimizer.zero_grad() # clear/zero out gradients 
             outputs = ae_model.decode(latent_mod)
             loss = criterion(outputs, targets)
             loss.backward()
