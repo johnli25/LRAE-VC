@@ -87,12 +87,18 @@ def extract_frames_from_UCF101_videos(
     output_dir,
     file_ext=".jpg"
 ):
+    """
+    Loops through 'video_dir', finds all .avi files,
+    extracts frames using OpenCV (up to a maximum of 100 frames per video)
+    and saves them in 'output_dir' with filename format:
+      <original_video_name>-FRAME-<frameIndex><file_ext>.
+    
+    Also prints video FPS, duration, expected frame count, and number of frames extracted.
+    """
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
-    # Loop over files in video_dir
     for file_name in sorted(os.listdir(video_dir)):
-        # We only process .avi files
         if file_name.lower().endswith('.avi'):
             video_path = os.path.join(video_dir, file_name)
 
@@ -102,23 +108,19 @@ def extract_frames_from_UCF101_videos(
                 print(f"Warning: Unable to open {video_path}. Skipping.")
                 continue
 
-            # Get video metadata
+            # Retrieve metadata
             fps = cap.get(cv2.CAP_PROP_FPS)
             frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-            duration_sec = 0
-            if fps and fps > 0:
-                duration_sec = frame_count / fps
+            duration_sec = frame_count / fps if fps and fps > 0 else 0
 
-            # Strip the extension to get the base name
-            # e.g. "v_ApplyEyeMakeup_g06_c07.avi" -> "v_ApplyEyeMakeup_g06_c07"
+            # Use the video filename without extension as base name
             base_name, _ = os.path.splitext(file_name)
 
             frame_idx = 0
-            while True:
+            while frame_idx < 100:  # cap at 100 frames
                 ret, frame = cap.read()
                 if not ret:
                     break  # no more frames
-
                 out_name = f"{base_name}-FRAME-{frame_idx}{file_ext}"
                 out_path = os.path.join(output_dir, out_name)
                 cv2.imwrite(out_path, frame)
@@ -131,7 +133,7 @@ def extract_frames_from_UCF101_videos(
                 f"  FPS: {fps:.2f}\n"
                 f"  Duration (s): {duration_sec:.2f}\n"
                 f"  Expected frames: {int(frame_count)}\n"
-                f"  Extracted frames: {frame_idx}\n"
+                f"  Extracted frames (capped at 100): {frame_idx}\n"
             )
 
 

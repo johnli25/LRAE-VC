@@ -113,7 +113,8 @@ if __name__ == "__main__":
         transforms.Resize((img_height, img_width)),
         transforms.ToTensor(),
     ])    # Data loading
-    path = "UCF_224x224x3_PNC_FrameCorr_input_imgs/"
+    # path = "UCF_224x224x3_PNC_FrameCorr_input_imgs/"
+    path = "TUCF_sports_action_224x224/"
     dataset = ImageDataset(path, path, transform=transform)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
