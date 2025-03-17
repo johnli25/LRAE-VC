@@ -2,7 +2,7 @@ import cv2
 import os
 import re
 
-def extract_32_frames_from_videos(
+def extract_32_frames_from_videos( # NOTE: for Shehab's shitty UCF Sports Action Dataset 
     video_dir, 
     output_dir, 
     num_frames=32,
@@ -80,14 +80,76 @@ def extract_32_frames_from_videos(
             cap.release()
     print("Extraction complete.")
 
+
+
+def extract_frames_from_UCF101_videos(
+    video_dir,
+    output_dir,
+    file_ext=".jpg"
+):
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Loop over files in video_dir
+    for file_name in sorted(os.listdir(video_dir)):
+        # We only process .avi files
+        if file_name.lower().endswith('.avi'):
+            video_path = os.path.join(video_dir, file_name)
+
+            # Open the video with OpenCV
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                print(f"Warning: Unable to open {video_path}. Skipping.")
+                continue
+
+            # Get video metadata
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            duration_sec = 0
+            if fps and fps > 0:
+                duration_sec = frame_count / fps
+
+            # Strip the extension to get the base name
+            # e.g. "v_ApplyEyeMakeup_g06_c07.avi" -> "v_ApplyEyeMakeup_g06_c07"
+            base_name, _ = os.path.splitext(file_name)
+
+            frame_idx = 0
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break  # no more frames
+
+                out_name = f"{base_name}-FRAME-{frame_idx}{file_ext}"
+                out_path = os.path.join(output_dir, out_name)
+                cv2.imwrite(out_path, frame)
+                frame_idx += 1
+
+            cap.release()
+
+            print(
+                f"Video: {file_name}\n"
+                f"  FPS: {fps:.2f}\n"
+                f"  Duration (s): {duration_sec:.2f}\n"
+                f"  Expected frames: {int(frame_count)}\n"
+                f"  Extracted frames: {frame_idx}\n"
+            )
+
+
+
 if __name__ == "__main__":
     # Update the directories here:
-    video_dir = "compressed_videos_output"      # e.g. "my_videos/"
-    output_dir = "UCF_32FPVid_224x224x3_imgs"      # e.g. "extracted_frames/"
+    video_dir = "New_UCF101_Videos"      # e.g. "my_videos/"
+    output_dir = "new_dataset_UCF101_frames"      # e.g. "extracted_frames/"
     
-    extract_32_frames_from_videos(
+    # extract_32_frames_from_videos(
+    #     video_dir=video_dir,
+    #     output_dir=output_dir,
+    #     num_frames=32,
+    #     file_ext=".jpg"  # or ".png"
+    # )
+
+    extract_frames_from_UCF101_videos(
         video_dir=video_dir,
         output_dir=output_dir,
-        num_frames=32,
         file_ext=".jpg"  # or ".png"
     )

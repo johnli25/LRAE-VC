@@ -105,7 +105,7 @@ class PNC16(nn.Module):
             # Zero out tail features for all samples in the batch
             batch_size, channels, _, _ = x2.size()
             tail_start = channels - tail_length
-            print(f"tail_len = {tail_length}; tail_start = {tail_start}")
+            # print(f"tail_len = {tail_length}; tail_start = {tail_start}")
             x2 = x2.clone()  # Create a copy of the tensor to avoid in-place operations!
             x2[:, tail_start:, :, :] = 0
 

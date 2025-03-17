@@ -290,7 +290,7 @@ if __name__ == "__main__":
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
-    train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length) # max_tail_length = None or 10 (in the case of PNC)
+    # train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length) # max_tail_length = None or 10 (in the case of PNC)
 
 
     if args.model == "PNC_with_classification":
@@ -351,7 +351,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             for i, (inputs, filenames) in enumerate(test_loader):
                 inputs = inputs.to(device)
-                num_dropped_features = 0 # NOTE: John, you manually set this constant during experimentation/evaluation? 
+                num_dropped_features = 8 # NOTE: John, you manually set this constant during experimentation/evaluation? 
                 outputs = model(inputs, num_dropped_features)  # Forward pass through autoencoder
 
                 # outputs is (batch_size, 3, image_h, image_w)

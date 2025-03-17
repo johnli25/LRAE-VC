@@ -9,7 +9,7 @@ from torchvision.datasets import UCF101
 from torchvision.transforms import Compose, Resize
 import torch.multiprocessing as mp
 from tqdm import tqdm
-from transformers import VideoMAEForVideoClassification, VideoTransformer, VideoMAEFeatureExtractor 
+from transformers import VideoMAEForVideoClassification, VideoMAEFeatureExtractor 
 
 def setup(rank, world_size):
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -203,12 +203,13 @@ def main():
         train=True,
         transform=transform,
         output_format="TCHW"
-    )
+    )    
 
     total_size = len(full_dataset)
     train_size = int(0.8 * total_size)
     test_size = total_size - train_size
     train_dataset, test_dataset = torch.utils.data.random_split(full_dataset, [train_size, test_size])
+    print(f"Train size: {len(train_dataset)}, Test size: {len(test_dataset)}")
 
     # Create DistributedSamplers with a dummy rank (0). They will be updated in each spawned process.
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=0, shuffle=True)
