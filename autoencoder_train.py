@@ -17,7 +17,7 @@ class_map = {
 }
 
 test_img_names = {
-    "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003",
+    "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003", # "Diving-Side_001", 
     "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
@@ -219,7 +219,7 @@ if __name__ == "__main__":
 
     ## Hyperparameters
     num_epochs = args.epochs
-    batch_size = 32
+    batch_size = 64
     learning_rate = 1e-3
     img_height, img_width = 224, 224 # NOTE: Dependent on autoencoder architecture!!
     path = "TUCF_sports_action_224x224/" # NOTE: already resized to 224x224 (so not really adaptable), but faster
@@ -271,24 +271,29 @@ if __name__ == "__main__":
 
     max_tail_length = None
     if args.model == "PNC":
-        model = PNC_Autoencoder().to(device)
+        model = PNC_Autoencoder()
         max_tail_length = 10 # true PNC
 
     if args.model == "PNC_256U":
-        model = PNC_256Unet_Autoencoder().to(device)
+        model = PNC_256Unet_Autoencoder()
 
     if args.model == "PNC16":
-        model = PNC16().to(device)
+        model = PNC16()
         # max_tail_length = 16 # NOTE: max_tail_length is slightly misleading: it's actually the number of channels to drop out (no tail technically )
 
     if args.model == "TestNew":
-        model = TestNew().to(device)
+        model = TestNew()
 
     if args.model == "TestNew2":
-        model = TestNew2().to(device)
+        model = TestNew2()
 
     if args.model == "TestNew3":
-        model = TestNew3().to(device)
+        model = TestNew3()
+
+    model = model.to(device)
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs")
+        model = nn.DataParallel(model)
 
     # if args.model_path exists, load and continue training or evaluate from there
     if args.model_path:
@@ -297,7 +302,7 @@ if __name__ == "__main__":
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
-    # train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length) # max_tail_length = None or 10 (in the case of PNC)
+    train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length) # max_tail_length = None or 10 (in the case of PNC)
 
 
     if args.model == "PNC_with_classification":
@@ -362,6 +367,7 @@ if __name__ == "__main__":
                 outputs = model(inputs)  # Forward pass through autoencoder
 
                 # outputs is (batch_size, 3, image_h, image_w)
+                print(f"Batch {i+1}/{len(test_loader)}, Output shape: {outputs.shape}")
                 # Save each reconstructed image
                 for j in range(inputs.size(0)):
                     output_np = outputs[j].permute(1, 2, 0).cpu().numpy()  # (image_h, image_w, 3)

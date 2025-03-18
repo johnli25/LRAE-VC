@@ -8,8 +8,11 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC_Autoencoder, PNC_256Unet_Autoencoder, PNC16, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
+from models import PNC16, PNC16_LSTM_AE, ConvLSTM_AE, PNC_Autoencoder, PNC_256Unet_Autoencoder, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
 from tqdm import tqdm
+import random
+import torchvision.utils as vutils
+
 
 # NOTE: uncomment below if you're using UCF Sports Action 
 class_map = {
@@ -29,9 +32,10 @@ class VideoFrameSequenceDataset(Dataset):
     subsequences of length `seq_len`.
     Example file naming: Diving-Side_001_0.jpg, Diving-Side_001_1.jpg, ...
     """
-    def __init__(self, img_dir, seq_len=20, transform=None):
+    def __init__(self, img_dir, seq_len=20, step_thru_frames=1, transform=None):
         self.img_dir = img_dir
         self.seq_len = seq_len
+        self.step_thru_frames = step_thru_frames    
         self.transform = transform
 
         # 1) Gather all frame paths, grouped by video "prefix".
@@ -76,11 +80,18 @@ class VideoFrameSequenceDataset(Dataset):
             num_frames = len(frame_paths)
             # We can form (num_frames - seq_len + 1) subsequences if seq_len <= num_frames
             if num_frames >= self.seq_len:
-                for start_idx in range(num_frames - self.seq_len + 1):
-                    self.start_samples.append((prefix, start_idx))
-        
-        print("samples: ", self.start_samples[:73])  # Print a few samples
+                # Generate start indices with step_between_clips
+                start_indices = list(range(0, num_frames - self.seq_len + 1, self.step_thru_frames))
 
+                # Ensure the last valid subsequence is included
+                if not start_indices: print(f"start_indices is SOMEHOW empty?! Video/prefix: {prefix}, num_frames: {num_frames}") # just a sanity check
+                if start_indices[-1] != num_frames - self.seq_len:
+                    start_indices.append(num_frames - self.seq_len)
+
+                # Add all start indices to self.start_samples
+                self.start_samples.extend((prefix, idx) for idx in start_indices)
+        
+        # print("samples: ", self.start_samples[:73])  # Print a few samples
 
     def __len__(self):
         return len(self.start_samples)
@@ -108,13 +119,113 @@ class VideoFrameSequenceDataset(Dataset):
         return frames_tensor, prefix, start_idx  # (frames_tensor, video_prefix, start_frame_index)
 
 
+def plot_train_val_loss(train_losses, val_losses):
+    epochs = range(1, len(train_losses) + 1)
+    plt.figure(figsize=(10, 6))
+    plt.plot(epochs, train_losses, label='Training Loss', color='blue', marker='o')
+    plt.plot(epochs, val_losses, label='Validation Loss', color='orange', marker='o')
+    
+    plt.title('Training and Validation Loss', fontsize=16)
+    plt.xlabel('Epochs', fontsize=14)
+    plt.ylabel('Loss', fontsize=14)
+    plt.legend(fontsize=12)
+    plt.grid(alpha=0.3)
+    plt.tight_layout()
+
+    plt.savefig('train_val_loss_curve.png', dpi=300)
+    plt.show()
+
+
+def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None):
+    train_losses, val_losses = [], []
+    best_val_loss = float('inf')
+    os.makedirs("ae_lstm_output_train", exist_ok=True)
+    
+    for epoch in range(num_epochs):
+        ae_model.train()
+        epoch_loss = 0.0    
+        for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training", unit="batch")):
+            frames_tensor = frames.to(device)
+            
+            optimizer.zero_grad()
+            recon = ae_model(frames_tensor)  # -> (batch_size, seq_len, 3, 224, 224)
+            loss = criterion(recon, frames_tensor)
+            loss.backward()
+            optimizer.step()
+            
+            epoch_loss += loss.item()
+
+            # NOTE: save reconstructed img into folder for sanity check purposes
+            # if batch_idx % 10 == 0:  # Save every 10 batches
+            #     for seq_idx in range(frames_tensor.size(0)):  # Iterate over each batch in batch_size 
+            #         frame_idx = random.randint(0, frames_tensor.size(1) - 1)  # Pick a random frame in the sequence
+            #         frame_input = frames_tensor[seq_idx, frame_idx].cpu()
+            #         frame_output = recon[seq_idx, frame_idx].cpu()
+
+            #         # Save original and reconstructed frame side by side
+            #         combined = torch.cat([frame_input, frame_output], dim=2)  # Concatenate along width
+            #         vutils.save_image(combined, f"ae_lstm_output_train/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
+
+            #         print(f"Saved train sample: ae_lstm_output_train/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
+        
+        avg_train_loss = epoch_loss / len(train_loader)
+        train_losses.append(avg_train_loss)
+        
+        val_loss = evaluate(ae_model, val_loader, criterion, device, save_sample="val")
+        val_losses.append(val_loss)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(ae_model.state_dict(), f"{model_name}_best_val_weights.pth")
+            print(f"New best model saved at epoch {epoch+1} with validation loss: {val_loss:.4f}")
+        
+        print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
+    
+    plot_train_val_loss(train_losses, val_losses)
+
+    # Final test/evaluation
+    test_loss = evaluate(ae_model, test_loader, criterion, device, save_sample="test")
+    print(f"Test Loss: {test_loss:.4f}")
+
+
+
+def evaluate(ae_model, dataloader, criterion, device, save_sample=False):
+    ae_model.eval()
+    running_loss = 0.0
+    os.makedirs("ae_lstm_output_test", exist_ok=True)
+    os.makedirs("ae_lstm_output_val", exist_ok=True)
+    
+    with torch.no_grad():
+        for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
+            frames_tensor = frames.to(device)
+            outputs = ae_model(frames_tensor)
+            loss = criterion(outputs, frames_tensor)
+            running_loss += loss.item()
+            
+            # Save a random frame from each sequence in the batch
+            for seq_idx in range(frames_tensor.size(0)):  # Iterate over each seq in the batch
+                frame_idx = random.randint(0, frames_tensor.size(1) - 1)  # Pick a random frame in the sequence
+                frame_input = frames_tensor[seq_idx, frame_idx].cpu()
+                frame_output = outputs[seq_idx, frame_idx].cpu()
+                
+                # Save original and reconstructed frame side by side
+                combined = torch.cat([frame_input, frame_output], dim=2)  # Concatenate along width
+                if save_sample == "test":
+                    vutils.save_image(combined, f"ae_lstm_output_test/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
+                    print(f"Saved test sample: ae_lstm_output_test/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
+                else:
+                    vutils.save_image(combined, f"ae_lstm_output_val/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
+                    print(f"Saved val sample: ae_lstm_output_val/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
+
+    return running_loss / len(dataloader)
+
+
 if __name__ == "__main__":
     def parse_args():
         parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
         parser.add_argument("--model", type=str, required=True,
-                            choices=["PNC", "PNC_256U", "PNC16", "TestNew", 
-                                     "TestNew2", "TestNew3", "PNC_NoTail", 
-                                     "PNC_with_classification", "LRAE_VC"],
+                            choices=["PNC", "PNC16", "PNC16_lstm_ae", "conv_lstm_ae",
+                                    "LRAE-VC", "TestNew", "TestNew2", "TestNew3"],
                             help="Model to train")
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
@@ -124,7 +235,7 @@ if __name__ == "__main__":
 
     # Hyperparameters
     num_epochs = args.epochs
-    batch_size = 2      # example smaller batch_size for sequences
+    batch_size = 16     
     learning_rate = 1e-3
     seq_len = 20        # We want 20-frame subsequences
     img_height, img_width = 224, 224
@@ -140,16 +251,17 @@ if __name__ == "__main__":
     dataset = VideoFrameSequenceDataset(
         img_dir=path,
         seq_len=seq_len,
-        transform=transform
+        transform=transform,
+        step_thru_frames=2
     )
-    print(f"Total subsequences in dataset: {len(dataset)}, with shape = {dataset[0][0].shape}")
+
     test_prefixes = set(test_img_names)
 
     all_indices = list(range(len(dataset)))
     print("length of all_indices: ", len(all_indices))  
     train_val_indices, test_indices = [], []
 
-    for i in tqdm(all_indices, desc="Processing indices"):
+    for i in all_indices:
         # Just use dataset.start_samples (it's already a list of (prefix, start_idx))
         sample_prefix, _ = dataset.start_samples[i]
         
@@ -161,9 +273,11 @@ if __name__ == "__main__":
     print(f"Test subsequences: {len(test_indices)}")
     # Shuffle train_val_indices
     np.random.shuffle(train_val_indices)
+    # Below is a print sanity check: 
+    # for i in range(5): print("First 5 dataset elems:", dataset[train_val_indices[i]][1], dataset[train_val_indices[i]][2])
 
     # Now pick 90% for train, 10% for val
-    train_size = int(1.0 * len(train_val_indices)) # NOTE: currently, 100% of training set kept and 0% validation set
+    train_size = int(0.9 * len(train_val_indices))
     val_size = len(train_val_indices) - train_size
 
     train_indices = train_val_indices[:train_size]
@@ -181,13 +295,24 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    print("Size of Dataloaders  ---  train_loader:", len(train_loader), "val_loader:", len(val_loader), "test_loader:", len(test_loader))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Example: pick your autoencoder model
     if args.model == "PNC16":
-        model = PNC16().to(device)
+        model = PNC16()
+    elif args.model == "PNC16_lstm_ae":
+        model = PNC16_LSTM_AE(hidden_dim=128, num_layers=2)
+    elif args.model == "conv_lstm_ae": # currently based on PNC16, which is a 16-feature/channel (for encode) model
+        model = ConvLSTM_AE(total_channels=16, hidden_channels=32, drop=0, use_predictor=False)
+
+    model = model.to(device)
+    if torch.cuda.device_count() > 1:
+        print(f"Using {torch.cuda.device_count()} GPUs")
+        model = nn.DataParallel(model)    
+
 
     # Possibly load existing weights
     if args.model_path:
@@ -197,6 +322,6 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-
-
-    
+    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model)
+    # save
+    torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
