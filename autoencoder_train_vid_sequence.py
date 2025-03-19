@@ -140,10 +140,18 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
     train_losses, val_losses = [], []
     best_val_loss = float('inf')
     os.makedirs("ae_lstm_output_train", exist_ok=True)
+    best_val_losses = {}
     if max_drops > 0: 
-        drops = 1
+        drops = 0  # should be 1 less than the drops you ACTUALLY want to start at
     
     for epoch in range(num_epochs):
+        # steadily increase the max # of drops every 2 epochs
+        if max_drops > 0 and epoch % 2 == 0:
+            drops = min(drops + 1, max_drops) 
+            if hasattr(ae_model, "module"): ae_model.module.drop = drops
+            else: ae_model.drop = drops
+            print(f"Tail Dropouts = {drops} for epoch {epoch}")
+
         ae_model.train()
         epoch_loss = 0.0    
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training", unit="batch")):
@@ -176,22 +184,23 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
         val_loss = evaluate(ae_model, val_loader, criterion, device, save_sample="val")
         val_losses.append(val_loss)
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            if max_drops > 0:
-                torch.save(ae_model.module.state_dict(), f"{model_name}_drop_{drops}_features_best_val_weights.pth")
-            else:
+        # Check and update best validation loss for the current dropout level
+        if max_drops > 0:
+            # Use current_drop as key; if not present, use infinity
+            if drops not in best_val_losses or val_loss < best_val_losses[drops]:
+                best_val_losses[drops] = val_loss
+                if hasattr(ae_model, "module"):
+                    torch.save(ae_model.module.state_dict(), f"{model_name}_drop_{drops}_features_best_val_weights.pth")
+                else:
+                    torch.save(ae_model.state_dict(), f"{model_name}_drop_{drops}_features_best_val_weights.pth")
+                print(f"New best model for dropout {drops} saved at epoch {epoch+1} with validation loss: {val_loss:.4f}")
+        else: # for NO dropout 
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
                 torch.save(ae_model.state_dict(), f"{model_name}_best_val_weights.pth")
-            print(f"New best model saved at epoch {epoch+1} with validation loss: {val_loss:.4f}")
-        
+                print(f"New best model saved at epoch {epoch+1} with validation loss: {val_loss:.4f}")
+            
         print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
-
-        # steadily increase the max # of drops every 2 epochs
-        if max_drops > 0 and epoch % 2 == 0:
-            drops = min(drops + 1, max_drops) 
-            if hasattr(ae_model, "module"): ae_model.module.drop = drops
-            else: ae_model.drop = drops
-            print(f"Tail Dropouts increased to {drops:.2f} for next epoch {epoch + 1}")
             
 
     plot_train_val_loss(train_losses, val_losses)
@@ -249,7 +258,7 @@ if __name__ == "__main__":
                             help="Model to train")
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
-        parser.add_argument("--drops", type=float, default=0, help="Dropout rate")
+        parser.add_argument("--drops", type=int, default=0, help="MAX dropout to enforce")
         return parser.parse_args()
 
     args = parse_args()
