@@ -208,10 +208,12 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=False):
     os.makedirs("ae_lstm_output_test", exist_ok=True)
     os.makedirs("ae_lstm_output_val", exist_ok=True)
 
+
+    # Test/Evaluate with dropout of 10/16 features 
     if hasattr(ae_model, "module"):
-        ae_model.module.drops = 2
+        ae_model.module.drops = 10
     else:
-        ae_model.drops = 2
+        ae_model.drops = 10
     
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
