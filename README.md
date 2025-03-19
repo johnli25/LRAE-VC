@@ -41,10 +41,8 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 - OTHERWISE, do `srun python your_script.py` if you're OUTSIDE of the GPU VM.
 - If you're using PyTorch's DDP: `srun python -m torch.distributed.launch your_script.py`
 
-### What I learned + Conceptual stuff
-##### What Is Redundancy?
-
-**Redundancy** means that the same critical information is stored in more than one place. In the context of an autoencoder’s latent space, redundancy means that even if some of the features (or channels) are lost or dropped, the remaining features still contain enough information to allow the decoder to reconstruct the original input accurately.
+### Journal: what I learned + conceptual stuff
+##### What Is Redundancy? It means that the same critical information is stored in more than one place. In the context of an autoencoder’s latent space, redundancy means that even if some of the features (or channels) are lost or dropped, the remaining features still contain enough information to allow the decoder to reconstruct the original input accurately.
 
 ---
 
@@ -71,4 +69,25 @@ In Summary
 - **Tail dropout** encourages the network to concentrate essential information into the early channels because those channels are reliably available. This promotes redundancy in a progressive, ordered manner.
 - **Random interspersed dropout** applies uniformly across all channels, forcing the network to spread information evenly rather than creating a reliable “base layer.” As a result, it may not foster the same type of redundancy where some channels are reliably preserved. 
 
-The choice between the two strategies depends on your design goals. If you want a progressive representation where some features are consistently available (mimicking a base layer in progressive transmission), tail dropout is more effective. If you aim to simulate completely random loss, interspersed dropout is closer to reality—but it might not lead to as robust an ordering of information unless you design additional mechanisms to encourage redundancy.
+The choice between the two strategies depends on your design goals. If you want a progressive representation where some features are consistently available (mimicking a base layer in progressive transmission), tail dropout is more effective. If you aim to simulate completely random loss, interspersed dropout is closer to reality—but it might not lead to as robust an ordering of information.
+
+##### Why did the original LRAE-VC (Fall 24 semester) not perform very well?
+
+Our autoencoder wasn't trained to be integrated with the LSTM imputation (AKA feature filler), so the weights for encoding/compressing + decoding/reconstruction did not "fit" well with the weights corresponding to the LSTM imputation model. The AE and LSTM components were trained separately and just smashed together without performing some extra "post"-training to ensure they "fit" and integrate smoothly. 
+
+##### Why did autoencoder_post_drop_train/eval2.py (which attempts to alleviate the above-mentioned problem) fail?
+
+Though autoencoder_post_drop_train/eval2.py does perform some post-training (following normal AE and LSTM trining) to try to get the AE and LSTM component to integrate smoothly, it still failed pretty spectacularly for-what I suspect are-the following reasons:
+1. The pipeline involved loading the AE (e.g. PNC16) model --> effectively "freezing" the encoder (via model.eval() and with torch.no_grad()) and detaching it from the AE model --> encoder encodes the latents and stores/caches them into a global dictionary (defaultdict) --> decoder uses that global dict of latents to reconstruct the sequences of video frames --> backpropagate gradients + update weights OF JUST THE DECODER (NOT THE ENCODER)! The last step was mostly a big problem. Although, this pipeline is still way to "fragmented" despite the attempt at "post" training. 
+
+2. I was training everything from scratch, including the dropouts, imputations, etc. *after each epoch*. It's much better to pretrain without incorporating any wacky constraints + conditions, and then progressively add dropouts, imputations, etc. in the after-pretraining training stage
+
+EDIT: (related to 2.) I just realized there's a bug in my code, particularly for if I set training_from_scratch=True. When I train from scratch, the encoder's initial weights will obviously be completely off, but then I never update the encoder's initial due to freezing/detaching the encoder LOL (via ae_model.eval() and torch.no_grad())
+
+##### Why do I not use autoencoder_post_drop_train/eval.py anymore?
+
+Though this was of course written before the 2nd version, there was an oversight when I wrote this. Namely, this implementation passed in the FULL (ground truth) combined video features. This obviously doesn't make sense because in a real scenario you won't have access to the full, combined video features, especially during network congestion + packet loss
+
+After realizing this I decided to implement my pipeline + forward pass as encoder -> lstm -> decoder, 
+
+##### 
