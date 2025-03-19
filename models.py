@@ -334,7 +334,9 @@ class ConvLSTM_AE(nn.Module):
             features = self.encoder(frame) 
         
             N = random.randint(0, self.drop)
+            # print(f"dropout: {N}")
             if N > 0:
+                features = features.clone() # clone to avoid in-place operations
                 features[:, -N:, :, :] = 0.0 # zero out last N channels
             
             partial_list.append(features) # (batch, 16, 32, 32)

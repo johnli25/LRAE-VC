@@ -136,10 +136,12 @@ def plot_train_val_loss(train_losses, val_losses):
     plt.show()
 
 
-def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None):
+def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0):
     train_losses, val_losses = [], []
     best_val_loss = float('inf')
     os.makedirs("ae_lstm_output_train", exist_ok=True)
+    if max_drops > 0: 
+        drops = 1
     
     for epoch in range(num_epochs):
         ae_model.train()
@@ -176,11 +178,22 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(ae_model.state_dict(), f"{model_name}_best_val_weights.pth")
+            if max_drops > 0:
+                torch.save(ae_model.module.state_dict(), f"{model_name}_drop_{drops}_features_best_val_weights.pth")
+            else:
+                torch.save(ae_model.state_dict(), f"{model_name}_best_val_weights.pth")
             print(f"New best model saved at epoch {epoch+1} with validation loss: {val_loss:.4f}")
         
         print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
-    
+
+        # steadily increase the max # of drops every 2 epochs
+        if max_drops > 0 and epoch % 2 == 0:
+            drops = min(drops + 1, max_drops) 
+            if hasattr(ae_model, "module"): ae_model.module.drop = drops
+            else: ae_model.drop = drops
+            print(f"Tail Dropouts increased to {drops:.2f} for next epoch {epoch + 1}")
+            
+
     plot_train_val_loss(train_losses, val_losses)
 
     # Final test/evaluation
@@ -194,6 +207,11 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=False):
     running_loss = 0.0
     os.makedirs("ae_lstm_output_test", exist_ok=True)
     os.makedirs("ae_lstm_output_val", exist_ok=True)
+
+    if hasattr(ae_model, "module"):
+        ae_model.module.drops = 2
+    else:
+        ae_model.drops = 2
     
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
@@ -212,10 +230,10 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=False):
                 combined = torch.cat([frame_input, frame_output], dim=2)  # Concatenate along width
                 if save_sample == "test":
                     vutils.save_image(combined, f"ae_lstm_output_test/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
-                    print(f"Saved test sample: ae_lstm_output_test/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
+                    # print(f"Saved test sample: ae_lstm_output_test/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
                 else:
                     vutils.save_image(combined, f"ae_lstm_output_val/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
-                    print(f"Saved val sample: ae_lstm_output_val/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
+                    # print(f"Saved val sample: ae_lstm_output_val/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
 
     return running_loss / len(dataloader)
 
@@ -229,12 +247,14 @@ if __name__ == "__main__":
                             help="Model to train")
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
+        parser.add_argument("--drops", type=float, default=0, help="Dropout rate")
         return parser.parse_args()
 
     args = parse_args()
 
     # Hyperparameters
     num_epochs = args.epochs
+    drops = args.drops
     batch_size = 16     
     learning_rate = 1e-3
     seq_len = 20        # We want 20-frame subsequences
@@ -322,6 +342,9 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model)
+    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops)
     # save
-    torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+    if drops > 0:
+        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    else: # no dropout OR original model
+        torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
