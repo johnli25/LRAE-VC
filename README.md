@@ -90,4 +90,10 @@ Though this was of course written before the 2nd version, there was an oversight
 
 After realizing this I decided to implement my pipeline + forward pass as encoder -> lstm -> decoder, 
 
-##### 
+##### Why did the original encoder -> lstm -> decoder version fail? 
+1. lstm flattened dimensions to 1D, making it harder for the model to work with and train from. My soln: use 2D ConvLSTM
+
+##### Pretraining first (without any extra stuff like dropouts + imputations) and then training with fancy stuff (e.g. dropouts) is MUCH better than trying to train everything, including dropouts after every epoch, at once.
+
+This turned out to be crucial for success
+
