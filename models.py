@@ -105,7 +105,7 @@ class PNC16(nn.Module):
             # Zero out tail features for all samples in the batch
             batch_size, channels, _, _ = x2.size()
             tail_start = channels - tail_length
-            # print(f"tail_len = {tail_length}; tail_start = {tail_start}")
+            print(f"tail_len = {tail_length}; tail_start = {tail_start}")
             x2 = x2.clone()  # Create a copy of the tensor to avoid in-place operations!
             x2[:, tail_start:, :, :] = 0
 
@@ -125,48 +125,7 @@ class PNC16(nn.Module):
 
         return y5
     
-
-
-# NOTE: Experimenting with PNC broken down + middle LSTM component 
-class PNC16Encoder(nn.Module): # Conv Encoder
-    def __init__(self):
-        super(PNC16Encoder, self).__init__()
-        
-        # Encoder layers exactly matching PNC16
-        self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (16, 32, 32)
-        self.encoder2 = nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (16, 32, 32)
-
-        # Activation function
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        """Encodes the input image to (16, 32, 32) feature space."""
-        x = self.relu(self.encoder1(x))  # (3, 224, 224) -> (16, 32, 32)
-        x = self.relu(self.encoder2(x))  # (16, 32, 32) -> (16, 32, 32)
-        return x
-
-class PNC16Decoder(nn.Module): # Conv Decoder
-    def __init__(self):
-        super().__init__()
-        # Same conv layers as in PNC16 decode
-        self.decoder1 = nn.ConvTranspose2d(16, 64, kernel_size=9, stride=7, padding=4, output_padding=6)
-        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
-        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
-        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)
-        self.relu = nn.ReLU()
-    
-    def forward(self, x):
-        # x: (batch_size, 16, 32, 32)
-        y1 = self.relu(self.decoder1(x))   # -> (batch_size, 64, 224, 224)
-        y2 = self.relu(self.decoder2(y1))    # -> (batch_size, 64, 224, 224)
-        y2 = y2 + y1
-        y3 = self.relu(self.decoder3(y2))    # -> (batch_size, 64, 224, 224)
-        y4 = self.relu(self.decoder3(y3))    # -> (batch_size, 64, 224, 224)
-        y4 = y4 + y3
-        y5 = self.final_layer(y4)            # -> (batch_size, 3, 224, 224)
-        y5 = torch.clamp(y5, 0, 1)
-        return y5
-
+# deprecated b/c isn't effective
 class PNC16_LSTM_AE(nn.Module):
     def __init__(self, hidden_dim=1024, num_layers=3, bidirectional=True):
         super().__init__()
@@ -225,7 +184,47 @@ class PNC16_LSTM_AE(nn.Module):
         # Reshape back to sequence format: (batch_size, seq_len, 3, 224, 224)
         decoded = decoded.view(bsz, seq_len, 3, 224, 224)
         return decoded
+    
 
+
+class PNC16Encoder(nn.Module): # Conv Encoder
+    def __init__(self):
+        super(PNC16Encoder, self).__init__()
+        
+        # Encoder layers exactly matching PNC16
+        self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (16, 32, 32)
+        self.encoder2 = nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (16, 32, 32)
+
+        # Activation function
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        """Encodes the input image to (16, 32, 32) feature space."""
+        x = self.relu(self.encoder1(x))  # (3, 224, 224) -> (16, 32, 32)
+        x = self.relu(self.encoder2(x))  # (16, 32, 32) -> (16, 32, 32)
+        return x
+
+class PNC16Decoder(nn.Module): # Conv Decoder
+    def __init__(self):
+        super().__init__()
+        # Same conv layers as in PNC16 decode
+        self.decoder1 = nn.ConvTranspose2d(16, 64, kernel_size=9, stride=7, padding=4, output_padding=6)
+        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
+        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
+        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)
+        self.relu = nn.ReLU()
+    
+    def forward(self, x):
+        # x: (batch_size, 16, 32, 32)
+        y1 = self.relu(self.decoder1(x))   # -> (batch_size, 64, 224, 224)
+        y2 = self.relu(self.decoder2(y1))    # -> (batch_size, 64, 224, 224)
+        y2 = y2 + y1
+        y3 = self.relu(self.decoder3(y2))    # -> (batch_size, 64, 224, 224)
+        y4 = self.relu(self.decoder3(y3))    # -> (batch_size, 64, 224, 224)
+        y4 = y4 + y3
+        y5 = self.final_layer(y4)            # -> (batch_size, 3, 224, 224)
+        y5 = torch.clamp(y5, 0, 1)
+        return y5
 
 
 class ConvLSTMCell(nn.Module):
@@ -291,12 +290,11 @@ class ConvLSTM(nn.Module):
         return torch.cat(outputs, dim=1)  # (batch, seq_len, hidden_channels, H, W)
     
 
-class ConvLSTM_AE(nn.Module):
-    def __init__(self, total_channels, hidden_channels, drop=0, use_predictor=False):
+class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding for feature/channel dropouts
+    def __init__(self, total_channels, hidden_channels, use_predictor=False):
         super().__init__()
         self.total_channels = total_channels
         self.hidden_channels = hidden_channels
-        self.drop = drop
         self.use_predictor = use_predictor
 
         # 1) encoder
@@ -320,7 +318,7 @@ class ConvLSTM_AE(nn.Module):
         # 5) finally, decoder
         self.decoder = PNC16Decoder() 
 
-    def forward(self, x_seq):
+    def forward(self, x_seq, drop=0):
         """
         x_seq: (batch_size, seq_len, 3, 224, 224)   
         returns (batch_size, seq_len, 3, 224, 224) reconstructed video frames/imgs sequence
@@ -333,11 +331,11 @@ class ConvLSTM_AE(nn.Module):
             frame = x_seq[:, t] # (batch, 3, 224, 224)
             features = self.encoder(frame) 
         
-            N = random.randint(0, self.drop)
-            # print(f"dropout: {N}")
-            if N > 0:
+            # 2) Randomly drop tail channels/features
+            # print(f"dropout: {drop}")
+            if drop > 0:
                 features = features.clone() # clone to avoid in-place operations
-                features[:, -N:, :, :] = 0.0 # zero out last N channels
+                features[:, -drop:, :, :] = 0.0 # zero out last N channels
             
             partial_list.append(features) # (batch, 16, 32, 32)
 
@@ -346,18 +344,88 @@ class ConvLSTM_AE(nn.Module):
 
         lstm_out = self.conv_lstm(lstm_input) # (batch, seq_len, hidden_channels, 32, 32)
 
+        # outputs = []
+        # for t in range(seq_len):
+        #     h_t = lstm_out[:, t] # (batch, hidden_channels, 32, 32)
+        #     if self.map_lstm2pred is not None: # Examples: map hidden_channels=32 --> total_channels=16 for PNC16 decoder
+        #         h_t = self.map_lstm2pred(h_t)
+            
+        #     recon_frame = self.decoder(h_t) # (batch, 3, 224, 224)
+        #     outputs.append(recon_frame.unsqueeze(1))
+
+        # return torch.cat(outputs, dim=1), None # (batch, seq_len, 3, 224, 224)
+    
         # if needed, map hidden state to total_channels, and finally decode!!
+        if self.map_lstm2pred is not None:
+            # Flatten batch and time dimensions for mapping
+            imputed_latents = self.map_lstm2pred(lstm_out.view(-1, self.hidden_channels, 32, 32))
+            # Reshape back to (batch, seq_len, total_channels, 32, 32)
+            imputed_latents = imputed_latents.view(bsz, seq_len, self.total_channels, 32, 32) # Example: 32 hidden channels -> 16 total channels (PNC16 AE)
+        else:
+            imputed_latents = lstm_out  # if no mapping is needed
+        
+        # decode each time step
         outputs = []
         for t in range(seq_len):
-            h_t = lstm_out[:, t] # (batch, hidden_channels, 32, 32)
-            if self.map_lstm2pred is not None: # Examples: map hidden_channels=32 --> total_channels=16 for PNC16 decoder
-                h_t = self.map_lstm2pred(h_t)
-            
-            recon_frame = self.decoder(h_t) # (batch, 3, 224, 224)
+            h_t = imputed_latents[:, t]  # (batch, total_channels, 32, 32)
+            recon_frame = self.decoder(h_t)  # (batch, 3, 224, 224)
             outputs.append(recon_frame.unsqueeze(1))
+        
+        recon = torch.cat(outputs, dim=1)  # (batch, seq_len, 3, 224, 224)
+        return recon, imputed_latents
+    
 
-        return torch.cat(outputs, dim=1) # (batch, seq_len, 3, 224, 224)
+class ConvLSTM_Impute_AE(nn.Module): 
+    def __init__(self, total_channels, hidden_channels, use_predictor=False):
+        super().__init__()
+        self.total_channels = total_channels
+        self.hidden_channels = hidden_channels
+        self.use_predictor = use_predictor
 
+        self.encoder = PNC16Encoder()  # produces (batch, total_channels, 32, 32)
+        self.conv_lstm = ConvLSTM(input_channels=total_channels, hidden_channels=hidden_channels)
+        
+        # Map LSTM output to total_channels if needed.
+        if hidden_channels != total_channels:
+            self.map_lstm2dec = nn.Conv2d(hidden_channels, total_channels, kernel_size=1, stride=1, padding=0)
+        else:
+            self.map_lstm2dec = None
+
+        self.decoder = PNC16Decoder()  # decodes latent to (batch, 3, 224, 224)
+
+    def forward(self, x_seq, drop=0):
+        """
+        x_seq: (batch, seq_len, 3, 224, 224)
+        returns: (batch, seq_len, 3, 224, 224)
+        """
+        bsz, seq_len, _, _, _ = x_seq.shape
+        partial_list = []
+        for t in range(seq_len):
+            frame = x_seq[:, t]  # (batch, 3, 224, 224)
+            features = self.encoder(frame)  # -> (batch, total_channels, 32, 32)
+            if drop > 0:
+                features = features.clone()  # avoid in-place modification issues
+                features[:, -drop:, :, :] = 0.0  # simulate dropout by zeroing out last 'drop' channels
+            partial_list.append(features)
+
+        # Stack latents along the time dimension
+        latent_seq = torch.stack(partial_list, dim=1)  # (batch, seq_len, total_channels, 32, 32)
+        
+        # Step 3: Process through ConvLSTM to get the actually filled/imputed latent sequence
+        lstm_out = self.conv_lstm(latent_seq)
+        print("lstm_out.shape: ", lstm_out.shape)
+        if self.map_lstm2dec is not None:
+            # Map the LSTM output from hidden channels to total channels
+            lstm_out = self.map_lstm2dec(lstm_out.view(-1, self.hidden_channels, 32, 32)) # convert from (batch, seq_len, hidden_channels, 32, 32) to (batch*seq_len, total_channels, 32, 32) and then map to total_channels
+            lstm_out = lstm_out.view(bsz, seq_len, self.total_channels, 32, 32) # and then reshape back to (batch, seq_len, total_channels, 32, 32)
+
+        # Step 4: Decode each timestep frame using the filled latent representation
+        outputs = []
+        for t in range(seq_len):
+            h_t = lstm_out[:, t]
+            recon_frame = self.decoder(h_t)  # (batch, 3, 224, 224)
+            outputs.append(recon_frame.unsqueeze(1)) # add time dimension: (batch, 3, 224, 224) -> (batch, 1, 3, 224, 224)
+        return torch.cat(outputs, dim=1)  # (batch, seq_len, 3, 224, 224)
         
 
 class TestNew(nn.Module):

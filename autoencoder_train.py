@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import argparse
 from models import PNC_Autoencoder, PNC_256Unet_Autoencoder, PNC16, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
+import random
 
 # NOTE: uncomment below if you're using UCF Sports Action 
 class_map = {
@@ -64,15 +65,23 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
 
+    if max_tail_length: 
+        print(f"Training with max tail length: {max_tail_length}")
+        drops = -1
+
     for epoch in range(num_epochs):
+        # increase the tail length
+        if max_tail_length and epoch % 2 == 0:
+            drops = min(drops + 1, max_tail_length)
+            print(f"Epoch {epoch}: Increasing tail length to {drops}")
+
         # Train the model
         model.train()
         train_loss = 0
         for inputs, _ in train_loader:
             # Sample a single tail length for the batch
             # torch.manual_seed(seed=42)
-            tail_len = torch.randint(0, max_tail_length, (1,)).item() if max_tail_length else None
-
+            tail_len = random.randint(0, drops) if max_tail_length else None
             inputs = inputs.to(device)
 
             optimizer.zero_grad()
@@ -118,10 +127,10 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length):
     with torch.no_grad():
         for inputs, _ in dataloader:
             # torch.manual_seed(seed=42)
-            tail_len = torch.randint(0, max_tail_length, (1,)).item() if max_tail_length else None
+            # tail_len = torch.randint(0, max_tail_length, (1,)).item() if max_tail_length else None
             # print("Eval tail length: ", tail_len)
             inputs = inputs.to(device)
-            outputs = model(inputs, tail_len) 
+            outputs = model(inputs, 0) 
             loss = criterion(outputs, inputs)
             test_loss += loss.item() * inputs.size(0)
 
@@ -279,7 +288,7 @@ if __name__ == "__main__":
 
     if args.model == "PNC16":
         model = PNC16()
-        # max_tail_length = 16 # NOTE: max_tail_length is slightly misleading: it's actually the number of channels to drop out (no tail technically )
+        max_tail_length = 12
 
     if args.model == "TestNew":
         model = TestNew()
@@ -302,7 +311,7 @@ if __name__ == "__main__":
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
-    train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length) # max_tail_length = None or 10 (in the case of PNC)
+    # train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length) # max_tail_length = None or 10 (in the case of PNC)
 
 
     if args.model == "PNC_with_classification":
@@ -363,8 +372,8 @@ if __name__ == "__main__":
         with torch.no_grad():
             for i, (inputs, filenames) in enumerate(test_loader):
                 inputs = inputs.to(device)
-                num_dropped_features = 0 # NOTE: John, you manually set this constant during experimentation/evaluation? 
-                outputs = model(inputs)  # Forward pass through autoencoder
+                num_dropped_features = 8 # NOTE: John, you manually set this constant during experimentation/evaluation? 
+                outputs = model(inputs, num_dropped_features)  # Forward pass through autoencoder
 
                 # outputs is (batch_size, 3, image_h, image_w)
                 print(f"Batch {i+1}/{len(test_loader)}, Output shape: {outputs.shape}")

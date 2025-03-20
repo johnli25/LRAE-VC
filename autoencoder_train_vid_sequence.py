@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC16, PNC16_LSTM_AE, ConvLSTM_AE, PNC_Autoencoder, PNC_256Unet_Autoencoder, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
+from models import PNC16, PNC16_LSTM_AE, ConvLSTM_AE, ConvLSTM_Impute_AE, PNC_Autoencoder, PNC_256Unet_Autoencoder, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
 from tqdm import tqdm
 import random
 import torchvision.utils as vutils
@@ -136,13 +136,13 @@ def plot_train_val_loss(train_losses, val_losses):
     plt.show()
 
 
-def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0):
+def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0, lambda_val=0.1):
     train_losses, val_losses = [], []
     best_val_loss = float('inf')
     os.makedirs("ae_lstm_output_train", exist_ok=True)
     best_val_losses = {}
     if max_drops > 0: 
-        drops = 0  # should be 1 less than the drops you ACTUALLY want to start at
+        drops = 10  # should be 1 less than the drops you ACTUALLY want to start at
     
     for epoch in range(num_epochs):
         # steadily increase the max # of drops every 2 epochs
@@ -156,28 +156,28 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
         epoch_loss = 0.0    
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training", unit="batch")):
             frames_tensor = frames.to(device)
-            
             optimizer.zero_grad()
-            recon = ae_model(frames_tensor)  # -> (batch_size, seq_len, 3, 224, 224)
-            loss = criterion(recon, frames_tensor)
-            loss.backward()
+            bsz, seq_len, _, _, _ = frames_tensor.size()
+            with torch.no_grad():
+                target_latents_list = []
+                for t in range(seq_len):
+                    frame = frames_tensor[:, t, :, :, :] # (batch, 3, 224, 224)
+                    if hasattr(ae_model, "module"): target_latents = ae_model.module.encoder(frame)
+                    else: target_latents = ae_model.encoder(frame)
+                    target_latents_list.append(target_latents)
+
+                target_latents = torch.stack(target_latents_list, dim=1) # traget_latents output shape = (batch, seq_len, 16, 32, 32)
+
+            drop_val = random.randint(0, drops) if max_drops > 0 else 0
+            recon, imputed_latents = ae_model(frames_tensor, drop_val)  # -> (batch_size, seq_len, 3, 224, 224)
+            recon_loss = criterion(recon, frames_tensor)
+            latent_loss = nn.functional.mse_loss(target_latents, imputed_latents)
+            total_loss = recon_loss + lambda_val * latent_loss
+            total_loss.backward()
             optimizer.step()
             
-            epoch_loss += loss.item()
+            epoch_loss += total_loss.item()
 
-            # NOTE: save reconstructed img into folder for sanity check purposes
-            # if batch_idx % 10 == 0:  # Save every 10 batches
-            #     for seq_idx in range(frames_tensor.size(0)):  # Iterate over each batch in batch_size 
-            #         frame_idx = random.randint(0, frames_tensor.size(1) - 1)  # Pick a random frame in the sequence
-            #         frame_input = frames_tensor[seq_idx, frame_idx].cpu()
-            #         frame_output = recon[seq_idx, frame_idx].cpu()
-
-            #         # Save original and reconstructed frame side by side
-            #         combined = torch.cat([frame_input, frame_output], dim=2)  # Concatenate along width
-            #         vutils.save_image(combined, f"ae_lstm_output_train/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
-
-            #         print(f"Saved train sample: ae_lstm_output_train/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
-        
         avg_train_loss = epoch_loss / len(train_loader)
         train_losses.append(avg_train_loss)
         
@@ -190,44 +190,40 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
             if drops not in best_val_losses or val_loss < best_val_losses[drops]:
                 best_val_losses[drops] = val_loss
                 if hasattr(ae_model, "module"):
-                    torch.save(ae_model.module.state_dict(), f"{model_name}_drop_{drops}_features_best_val_weights.pth")
-                else:
-                    torch.save(ae_model.state_dict(), f"{model_name}_drop_{drops}_features_best_val_weights.pth")
-                print(f"New best model for dropout {drops} saved at epoch {epoch+1} with validation loss: {val_loss:.4f}")
+                    torch.save(ae_model.module.state_dict(), f"{model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
+                    print(f"Saved model weights for {model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
+                else: # regularization enabled
+                    torch.save(ae_model.state_dict(), f"{model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
+                    print(f"Saved model weights for {model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
+                print(f"New best model for dropped features = {drops} saved at epoch {epoch+1} with validation loss: {val_loss:.4f}")
         else: # for NO dropout 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 torch.save(ae_model.state_dict(), f"{model_name}_best_val_weights.pth")
-                print(f"New best model saved at epoch {epoch+1} with validation loss: {val_loss:.4f}")
+                print(f"New best model saved at epoch {epoch+1} with validation loss: {val_loss:.4f} as {model_name}_best_val_weights.pth")
             
         print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
             
 
-    plot_train_val_loss(train_losses, val_losses)
+    # plot_train_val_loss(train_losses, val_losses)
 
     # Final test/evaluation
-    test_loss = evaluate(ae_model, test_loader, criterion, device, save_sample="test")
+    test_loss = evaluate(ae_model, test_loader, criterion, device, save_sample="test", drop=0) # do constant number of drops 
     print(f"Test Loss: {test_loss:.4f}")
 
 
 
-def evaluate(ae_model, dataloader, criterion, device, save_sample=False):
+def evaluate(ae_model, dataloader, criterion, device, save_sample=False, drop=0):
     ae_model.eval()
     running_loss = 0.0
     os.makedirs("ae_lstm_output_test", exist_ok=True)
     os.makedirs("ae_lstm_output_val", exist_ok=True)
 
-
-    # Test/Evaluate with dropout of 10/16 features 
-    if hasattr(ae_model, "module"):
-        ae_model.module.drops = 10
-    else:
-        ae_model.drops = 10
-    
+    random.seed(42) # to ensure reproducibility for random.randint(0, frames_tensor.size(1) - 1)
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
             frames_tensor = frames.to(device)
-            outputs = ae_model(frames_tensor)
+            outputs, _ = ae_model(frames_tensor, drop) # NOTE: returns reconstructed frames of shape (batch_size, seq_len, 3, 224, 224) AND imputed latents of shape (batch_size, seq_len, 16, 32, 32)
             loss = criterion(outputs, frames_tensor)
             running_loss += loss.item()
             
@@ -259,6 +255,7 @@ if __name__ == "__main__":
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
         parser.add_argument("--drops", type=int, default=0, help="MAX dropout to enforce")
+        parser.add_argument("--lambda_val", type=float, default=0.0, help="Weight for latent loss")
         return parser.parse_args()
 
     args = parse_args()
@@ -337,7 +334,7 @@ if __name__ == "__main__":
     elif args.model == "PNC16_lstm_ae":
         model = PNC16_LSTM_AE(hidden_dim=128, num_layers=2)
     elif args.model == "conv_lstm_ae": # currently based on PNC16, which is a 16-feature/channel (for encode) model
-        model = ConvLSTM_AE(total_channels=16, hidden_channels=32, drop=0, use_predictor=False)
+        model = ConvLSTM_AE(total_channels=16, hidden_channels=32, use_predictor=False)
 
     model = model.to(device)
     if torch.cuda.device_count() > 1:
@@ -345,17 +342,44 @@ if __name__ == "__main__":
         model = nn.DataParallel(model)    
 
 
-    # Possibly load existing weights
+    # NOTE: use this function to convert from DataParallel model to normal model
+    def convertFromDataParallelNormal(checkpoint):
+        new_checkpoint = {}
+        for key, value in checkpoint.items():
+            new_key = key
+            if key.startswith("module."):
+                new_key = key[len("module."):]
+            new_checkpoint[new_key] = value
+        return new_checkpoint
+    
+    # NOTE: use this function to convert from normal model to DataParallel model
+    def convertFromNormalToDataParallel(checkpoint):
+        new_checkpoint = {}
+        for key, value in checkpoint.items():
+            new_key = key
+            if not key.startswith("module."):
+                new_key = "module." + key
+            new_checkpoint[new_key] = value
+        return new_checkpoint
+
     if args.model_path:
-        model.load_state_dict(torch.load(args.model_path, map_location=device))
+        checkpoint = torch.load(args.model_path, map_location=device)
+        checkpoint = convertFromNormalToDataParallel(checkpoint)
+        model.load_state_dict(checkpoint)
+        print(f"Loaded model weights from {args.model_path}")
 
     # Define loss/optimizer
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops)
+    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
     # save
     if drops > 0:
-        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
+        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
+        print(f"Model saved as {args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
     else: # no dropout OR original model
         torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+        print(f"Model saved as {args.model}_final_weights.pth")
+
+    # evaluate(model, test_loader, criterion, device, save_sample="test", drop=drops) # constant number of drops
+    
