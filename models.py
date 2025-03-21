@@ -61,7 +61,7 @@ class PNC_Autoencoder(nn.Module):
         y5 = torch.clamp(y5, min=0, max=1)  # Normalize output to [0, 1]
 
         return y5
-    
+
 
 class PNC16(nn.Module):
     def __init__(self):
@@ -124,6 +124,57 @@ class PNC16(nn.Module):
         y5 = self.decode(x2)  # (16, 32, 32) -> (3, 224, 224)
 
         return y5
+    
+
+class PNC32(nn.Module):
+    def __init__(self):
+        super(PNC32, self).__init__()
+        
+        # Encoder: change number of channels from 16 to 32.
+        self.encoder1 = nn.Conv2d(3, 32, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (32, 32, 32)
+        self.encoder2 = nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1)  # (32, 32, 32) -> (32, 32, 32)
+
+        # Decoder: update first decoder layer to accept 32 channels.
+        self.decoder1 = nn.ConvTranspose2d(32, 64, kernel_size=9, stride=7, padding=4, output_padding=6)  # (32, 32, 32) -> (64, 224, 224)
+        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
+        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)  # (64, 224, 224) -> (64, 224, 224)
+        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)  # (64, 224, 224) -> (3, 224, 224)
+
+        self.relu = nn.ReLU()
+
+    def encode(self, x):
+        """Perform encoding only."""
+        x = self.relu(self.encoder1(x))  # (3, 224, 224) -> (32, 32, 32)
+        x = self.relu(self.encoder2(x))  # (32, 32, 32) -> (32, 32, 32)
+        return x
+
+    def decode(self, x):
+        """Perform decoding only."""
+        y1 = self.relu(self.decoder1(x))  # (32, 32, 32) -> (64, 224, 224)
+        y2 = self.relu(self.decoder2(y1))  # (64, 224, 224) -> (64, 224, 224)
+        y2 = y2 + y1  # Skip connection
+        y3 = self.relu(self.decoder3(y2))  # (64, 224, 224) -> (64, 224, 224)
+        # Example: using decoder3 a second time for another pass (you might choose to define a separate layer)
+        y4 = self.relu(self.decoder3(y3))  # (64, 224, 224) -> (64, 224, 224)
+        y4 = y4 + y3  # Skip connection
+        y5 = self.final_layer(y4)  # (64, 224, 224) -> (3, 224, 224)
+        y5 = torch.clamp(y5, min=0, max=1)  # Normalize output to [0, 1]
+        return y5
+
+    def forward(self, x, tail_length=None):
+        # Encoder
+        x2 = self.encode(x)  # (3, 224, 224) -> (32, 32, 32)
+        if tail_length is not None:
+            batch_size, channels, _, _ = x2.size()
+            tail_start = channels - tail_length
+            # print(f"tail_len = {tail_length}; tail_start = {tail_start}")
+            x2 = x2.clone()  # Avoid in-place modification
+            x2[:, tail_start:, :, :] = 0
+
+        # Decoder
+        y5 = self.decode(x2)  # (32, 32, 32) -> (3, 224, 224)
+        return y5
+
     
 # deprecated b/c isn't effective
 class PNC16_LSTM_AE(nn.Module):
@@ -344,6 +395,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
 
         lstm_out = self.conv_lstm(lstm_input) # (batch, seq_len, hidden_channels, 32, 32)
 
+        print(f"tail_len = {drop}; tail_start = {features.shape[1] - drop}")
         # outputs = []
         # for t in range(seq_len):
         #     h_t = lstm_out[:, t] # (batch, hidden_channels, 32, 32)

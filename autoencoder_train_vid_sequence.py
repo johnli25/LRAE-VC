@@ -181,7 +181,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
         avg_train_loss = epoch_loss / len(train_loader)
         train_losses.append(avg_train_loss)
         
-        val_loss = evaluate(ae_model, val_loader, criterion, device, save_sample="val")
+        val_loss = evaluate(ae_model, val_loader, criterion, device, save_sample=None) # set to "val" if needed
         val_losses.append(val_loss)
 
         # Check and update best validation loss for the current dropout level
@@ -213,13 +213,12 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
 
 
 
-def evaluate(ae_model, dataloader, criterion, device, save_sample=False, drop=0):
+def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0):
     ae_model.eval()
     running_loss = 0.0
     os.makedirs("ae_lstm_output_test", exist_ok=True)
     os.makedirs("ae_lstm_output_val", exist_ok=True)
 
-    random.seed(42) # to ensure reproducibility for random.randint(0, frames_tensor.size(1) - 1)
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
             frames_tensor = frames.to(device)
@@ -227,20 +226,51 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=False, drop=0)
             loss = criterion(outputs, frames_tensor)
             running_loss += loss.item()
             
-            # Save a random frame from each sequence in the batch
-            for seq_idx in range(frames_tensor.size(0)):  # Iterate over each seq in the batch
-                frame_idx = random.randint(0, frames_tensor.size(1) - 1)  # Pick a random frame in the sequence
-                frame_input = frames_tensor[seq_idx, frame_idx].cpu()
-                frame_output = outputs[seq_idx, frame_idx].cpu()
-                
-                # Save original and reconstructed frame side by side
-                combined = torch.cat([frame_input, frame_output], dim=2)  # Concatenate along width
-                if save_sample == "test":
-                    vutils.save_image(combined, f"ae_lstm_output_test/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
-                    # print(f"Saved test sample: ae_lstm_output_test/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
-                else:
-                    vutils.save_image(combined, f"ae_lstm_output_val/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
-                    # print(f"Saved val sample: ae_lstm_output_val/{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png")
+            # Iterate over every sequence in the batch and every frame in the sequence.
+            for seq_idx in range(frames_tensor.size(0)):
+                for frame_idx in range(frames_tensor.size(1)):
+                    # Determine which directory to use.
+                    save_dir = "ae_lstm_output_test" if save_sample == "test" else "ae_lstm_output_val"
+                    file_name = f"{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}.png"
+                    file_path = os.path.join(save_dir, file_name)
+
+                    frame_input = frames_tensor[seq_idx, frame_idx].cpu()
+                    frame_output = outputs[seq_idx, frame_idx].cpu()
+                    
+                    # Concatenate original and reconstructed frame side by side.
+                    combined_frame = torch.cat((frame_input, frame_output), dim=2)  # Concatenate along the width dimension
+                    vutils.save_image(combined_frame, file_path)
+
+    return running_loss / len(dataloader)
+
+
+def evaluate_realistic(ae_model, dataloader, criterion, device):
+    ae_model.eval()
+    running_loss = 0.0
+    os.makedirs("ae_lstm_output_test_realistic", exist_ok=True)
+
+    drop = random.randint(0, 16)  # Randomly select a drop value between 0 and 16
+    with torch.no_grad():
+        for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
+            drop = random.randint(0, 16)
+            frames_tensor = frames.to(device)
+            outputs, _ = ae_model(frames_tensor, drop) 
+            loss = criterion(outputs, frames_tensor)
+            running_loss += loss.item()
+            
+            if drop > 11: # Save frames only if drop > 11
+                # Iterate over every sequence in the batch and every frame in the sequence.
+                for seq_idx in range(frames_tensor.size(0)):
+                    for frame_idx in range(frames_tensor.size(1)):
+                        file_name = f"{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}_drop={drop}.png"
+                        file_path = os.path.join("ae_lstm_output_test_realistic", file_name)
+
+                        frame_input = frames_tensor[seq_idx, frame_idx].cpu()
+                        frame_output = outputs[seq_idx, frame_idx].cpu()
+                        
+                        # Concatenate original and reconstructed frame side by side.
+                        combined_frame = torch.cat((frame_input, frame_output), dim=2)  # Concatenate along the width dimension
+                        vutils.save_image(combined_frame, file_path)
 
     return running_loss / len(dataloader)
 
@@ -364,7 +394,7 @@ if __name__ == "__main__":
 
     if args.model_path:
         checkpoint = torch.load(args.model_path, map_location=device)
-        checkpoint = convertFromNormalToDataParallel(checkpoint)
+        checkpoint = convertFromDataParallelNormal(checkpoint)
         model.load_state_dict(checkpoint)
         print(f"Loaded model weights from {args.model_path}")
 
@@ -372,14 +402,17 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
+    # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
     # save
-    if drops > 0:
-        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
-        print(f"Model saved as {args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
-    else: # no dropout OR original model
-        torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
-        print(f"Model saved as {args.model}_final_weights.pth")
+    # if drops > 0:
+    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
+    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
+    # else: # no dropout OR original model
+    #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+    #     print(f"Model saved as {args.model}_final_weights.pth")
 
-    # evaluate(model, test_loader, criterion, device, save_sample="test", drop=drops) # constant number of drops
+
+    # NOTE: for Experimental Evaluation
+    evaluate(model, test_loader, criterion, device, save_sample="test", drop=drops) # constant number of drops
+    # evaluate_realistic(model, test_loader, criterion, device) # random number of drops
     

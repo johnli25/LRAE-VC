@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC_Autoencoder, PNC_256Unet_Autoencoder, PNC16, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
+from models import PNC_Autoencoder, PNC_256Unet_Autoencoder, PNC16, PNC32, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
 import random
 
 # NOTE: uncomment below if you're using UCF Sports Action 
@@ -219,7 +219,7 @@ def plot_train_val_loss(train_losses, val_losses):
 if __name__ == "__main__":
     def parse_args():
         parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
-        parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_256U", "PNC16", "TestNew", "TestNew2", "TestNew3", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
+        parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_256U", "PNC16", "PNC32", "TestNew", "TestNew2", "TestNew3", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
                             help="Model to train")
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
@@ -290,6 +290,10 @@ if __name__ == "__main__":
         model = PNC16()
         max_tail_length = 12
 
+    if args.model == "PNC32":
+        model = PNC32()
+        # max_tail_length = 12
+
     if args.model == "TestNew":
         model = TestNew()
 
@@ -311,7 +315,7 @@ if __name__ == "__main__":
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
-    # train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length) # max_tail_length = None or 10 (in the case of PNC)
+    train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length) # max_tail_length = None or 10 (in the case of PNC)
 
 
     if args.model == "PNC_with_classification":
@@ -372,7 +376,7 @@ if __name__ == "__main__":
         with torch.no_grad():
             for i, (inputs, filenames) in enumerate(test_loader):
                 inputs = inputs.to(device)
-                num_dropped_features = 8 # NOTE: John, you manually set this constant during experimentation/evaluation? 
+                num_dropped_features = 0 # NOTE: John, you manually set this constant during experimentation/evaluation? 
                 outputs = model(inputs, num_dropped_features)  # Forward pass through autoencoder
 
                 # outputs is (batch_size, 3, image_h, image_w)
