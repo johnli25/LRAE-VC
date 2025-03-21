@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC16, PNC32, ConvLSTM_AE, ConvLSTM_Impute_AE, PNC_Autoencoder, PNC_256Unet_Autoencoder, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
+from models import PNC16, PNC32, ConvLSTM_AE, PNC_Autoencoder, PNC_256Unet_Autoencoder, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
 from tqdm import tqdm
 import random
 import torchvision.utils as vutils
@@ -142,7 +142,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
     os.makedirs("ae_lstm_output_train", exist_ok=True)
     best_val_losses = {}
     if max_drops > 0: 
-        drops = 14  # should be 1 less than the drops you ACTUALLY want to start at
+        drops = -1  # should be 1 less than the drops you ACTUALLY want to start at
     
     for epoch in range(num_epochs):
         # steadily increase the max # of drops every 2 epochs
@@ -281,7 +281,7 @@ if __name__ == "__main__":
     def parse_args():
         parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
         parser.add_argument("--model", type=str, required=True,
-                            choices=["PNC", "PNC16", "PNC16_lstm_ae", "conv_lstm_ae",
+                            choices=["PNC", "PNC16", "PNC32", "conv_lstm_ae", "conv_lstm_PNC32_ae",
                                     "LRAE-VC", "TestNew", "TestNew2", "TestNew3"],
                             help="Model to train")
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
