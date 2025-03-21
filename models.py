@@ -369,61 +369,47 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         # 5) finally, decoder
         self.decoder = PNC16Decoder() 
 
-    def forward(self, x_seq, drop=0):
+    def forward(self, x_seq, drop=0, eval_real=False):
         """
         x_seq: (batch_size, seq_len, 3, 224, 224)   
         returns (batch_size, seq_len, 3, 224, 224) reconstructed video frames/imgs sequence
         """
         bsz, seq_len, c, h, w = x_seq.shape
-
+        drop_levels = []
         # 1) Encode + randomly drop channels
         partial_list = []
         for t in range(seq_len):
             frame = x_seq[:, t] # (batch, 3, 224, 224)
             features = self.encoder(frame) 
+            current_drop = []
         
             # 2) Randomly drop tail channels/features
-            if drop > 0:
-                features = features.clone()  
-                for i in range(features.size(0)):
-                    random_drop = torch.randint(low=0, high=drop + 1, size=(1,)).item()
-                    if random_drop > 0:
-                        features[i, -random_drop:, :, :] = 0.0
+            if drop > 0 or eval_real:
+                features = features.clone()  # avoid in-place modifications
+                if self.training or eval_real:
+                    # Training: randomly drop 0 to `drop` tail channels per sample.
+                    for i in range(features.size(0)):
+                        random_drop = torch.randint(low=0, high=drop + 1, size=(1,)).item()
+                        if eval_real:
+                            current_drop.append(random_drop)
+                        # print("random_drop:", random_drop)
+                        if random_drop > 0:
+                            features[i, -random_drop:, :, :] = 0.0
+                else:
+                    # Evaluation: drop a constant number of tail channels (e.g., exactly 'drop' channels)
+                    features[:, -drop:, :, :] = 0.0
 
-                # NOTE: this is functionally equivalent to the above code, but VECTORIZED (using a mask) and more efficient
-                # features = features.clone()  # avoid in-place operations
-                # B, C, H, W = features.shape
-                # # Generate a random dropout value (0 to drop) for each sample in the batch.
-                # random_drops = torch.randint(low=0, high=drop, size=(B,), device=features.device)
-                # # For each sample, channels with indices >= (C - random_drop) should be dropped.
-                # # Create an index tensor for channels.
-                # channel_idx = torch.arange(C, device=features.device).unsqueeze(0).expand(B, C)
-                # # Compute the threshold for each sample: channels before this index are kept.
-                # thresholds = (C - random_drops).unsqueeze(1)  # shape: (B, 1)
-                # # Create a mask: True (or 1) for channels to keep, False (or 0) for channels to drop.
-                # mask = (channel_idx < thresholds).float().unsqueeze(2).unsqueeze(3)  # shape: (B, C, 1, 1)
-                # # Apply the mask to zero out the dropped channels.
-                # features = features * mask
-
-            
+            if eval_real: # if eval_real, append drop levels for each sample
+                drop_levels.append(current_drop)
             partial_list.append(features) # (batch, 16, 32, 32)
+
+        # Convert drop_levels (a list of length seq_len, each an array of length bsz) to shape (bsz, seq_len) by transposing the list:
+        drop_levels = list(map(list, zip(*drop_levels)))
 
         # stack features along the time dimension (seq_len dimension = 1)
         lstm_input = torch.stack(partial_list, dim=1) # (batch, seq_len, 16, 32, 32)
 
         lstm_out = self.conv_lstm(lstm_input) # (batch, seq_len, hidden_channels, 32, 32)
-
-        # print(f"drop {drop} features in tail")
-        # outputs = []
-        # for t in range(seq_len):
-        #     h_t = lstm_out[:, t] # (batch, hidden_channels, 32, 32)
-        #     if self.map_lstm2pred is not None: # Examples: map hidden_channels=32 --> total_channels=16 for PNC16 decoder
-        #         h_t = self.map_lstm2pred(h_t)
-            
-        #     recon_frame = self.decoder(h_t) # (batch, 3, 224, 224)
-        #     outputs.append(recon_frame.unsqueeze(1))
-
-        # return torch.cat(outputs, dim=1), None # (batch, seq_len, 3, 224, 224)
     
         # if needed, map hidden state to total_channels, and finally decode!!
         if self.map_lstm2pred is not None:
@@ -442,7 +428,12 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             outputs.append(recon_frame.unsqueeze(1))
         
         recon = torch.cat(outputs, dim=1)  # (batch, seq_len, 3, 224, 224)
-        return recon, imputed_latents
+
+        if eval_real:
+            return recon, imputed_latents, drop_levels
+        else:
+            return recon, imputed_latents, None
+
     
 
 class ConvLSTM_Impute_AE(nn.Module): 
