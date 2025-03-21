@@ -39,7 +39,6 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 - `nvidia-smi` for GPU stats
 - `du -sh path_to_file_or_folder` to show disk space of folder or file
 - `ls -1 /path/to/directory | wc -l` to count the number of files in a directory
-- `ls -1 /path/to/directory | wc -l` to count the number of files in a directory
 - ** YOU MUST do `srun --pty bash`, `ssh gpuaXXX`, or in general be inside the GPU VM to export env vars MASTER_ADDR and MASTER_PORT for PyTorch's DDP to work! `export MASTER_ADDR=$(hostname)` and `export MASTER_PORT=12355` and then run w/ `python your_script.py` !!
 - Make sure to ONLY do `python your_script.py` when you're in the GPU VM via `srun --pty bash`
 - OTHERWISE, do `srun python your_script.py` if you're OUTSIDE of the GPU VM.
