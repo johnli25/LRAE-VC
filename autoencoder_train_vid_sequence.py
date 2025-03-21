@@ -142,7 +142,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
     os.makedirs("ae_lstm_output_train", exist_ok=True)
     best_val_losses = {}
     if max_drops > 0: 
-        drops = 10  # should be 1 less than the drops you ACTUALLY want to start at
+        drops = 1  # should be 1 less than the drops you ACTUALLY want to start at
     
     for epoch in range(num_epochs):
         # steadily increase the max # of drops every 2 epochs
@@ -154,7 +154,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
 
         ae_model.train()
         epoch_loss = 0.0    
-        for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{num_epochs} - Training", unit="batch")):
+        for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}/{num_epochs} - Training", unit="batch")):
             frames_tensor = frames.to(device)
             optimizer.zero_grad()
             bsz, seq_len, _, _, _ = frames_tensor.size()
@@ -195,14 +195,14 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
                 else: # regularization enabled
                     torch.save(ae_model.state_dict(), f"{model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
                     print(f"Saved model weights for {model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
-                print(f"New best model for dropped features = {drops} saved at epoch {epoch+1} with validation loss: {val_loss:.4f}")
+                print(f"New best model for dropped features = {drops} saved at epoch {epoch} with validation loss: {val_loss:.4f}")
         else: # for NO dropout 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 torch.save(ae_model.state_dict(), f"{model_name}_best_val_weights.pth")
-                print(f"New best model saved at epoch {epoch+1} with validation loss: {val_loss:.4f} as {model_name}_best_val_weights.pth")
+                print(f"New best model saved at epoch {epoch} with validation loss: {val_loss:.4f} as {model_name}_best_val_weights.pth")
             
-        print(f"Epoch [{epoch+1}/{num_epochs}] - Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
+        print(f"Epoch [{epoch}/{num_epochs}] - Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
             
 
     # plot_train_val_loss(train_losses, val_losses)
@@ -394,7 +394,7 @@ if __name__ == "__main__":
 
     if args.model_path:
         checkpoint = torch.load(args.model_path, map_location=device)
-        checkpoint = convertFromDataParallelNormal(checkpoint)
+        checkpoint = convertFromNormalToDataParallel(checkpoint)
         model.load_state_dict(checkpoint)
         print(f"Loaded model weights from {args.model_path}")
 
@@ -402,14 +402,14 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
+    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
     # save
-    # if drops > 0:
-    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
-    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
-    # else: # no dropout OR original model
-    #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
-    #     print(f"Model saved as {args.model}_final_weights.pth")
+    if drops > 0:
+        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
+        print(f"Model saved as {args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
+    else: # no dropout OR original model
+        torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+        print(f"Model saved as {args.model}_final_weights.pth")
 
 
     # NOTE: for Experimental Evaluation

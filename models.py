@@ -383,10 +383,28 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             features = self.encoder(frame) 
         
             # 2) Randomly drop tail channels/features
-            # print(f"dropout: {drop}")
             if drop > 0:
-                features = features.clone() # clone to avoid in-place operations
-                features[:, -drop:, :, :] = 0.0 # zero out last N channels
+                features = features.clone()  
+                for i in range(features.size(0)):
+                    random_drop = torch.randint(low=0, high=drop + 1, size=(1,)).item()
+                    if random_drop > 0:
+                        features[i, -random_drop:, :, :] = 0.0
+
+                # NOTE: this is functionally equivalent to the above code, but VECTORIZED (using a mask) and more efficient
+                # features = features.clone()  # avoid in-place operations
+                # B, C, H, W = features.shape
+                # # Generate a random dropout value (0 to drop) for each sample in the batch.
+                # random_drops = torch.randint(low=0, high=drop, size=(B,), device=features.device)
+                # # For each sample, channels with indices >= (C - random_drop) should be dropped.
+                # # Create an index tensor for channels.
+                # channel_idx = torch.arange(C, device=features.device).unsqueeze(0).expand(B, C)
+                # # Compute the threshold for each sample: channels before this index are kept.
+                # thresholds = (C - random_drops).unsqueeze(1)  # shape: (B, 1)
+                # # Create a mask: True (or 1) for channels to keep, False (or 0) for channels to drop.
+                # mask = (channel_idx < thresholds).float().unsqueeze(2).unsqueeze(3)  # shape: (B, C, 1, 1)
+                # # Apply the mask to zero out the dropped channels.
+                # features = features * mask
+
             
             partial_list.append(features) # (batch, 16, 32, 32)
 
@@ -395,7 +413,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
 
         lstm_out = self.conv_lstm(lstm_input) # (batch, seq_len, hidden_channels, 32, 32)
 
-        print(f"tail_len = {drop}; tail_start = {features.shape[1] - drop}")
+        # print(f"drop {drop} features in tail")
         # outputs = []
         # for t in range(seq_len):
         #     h_t = lstm_out[:, t] # (batch, hidden_channels, 32, 32)
