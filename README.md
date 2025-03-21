@@ -29,8 +29,8 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 - [ ] Create rate-distortion curve
 - [ ] Implement Tambur + FEC/ECC
 - [ ] Implement quantization + entropy coding (if time available)
-- [ ] Implement the modified, regularized loss from here: https://interdigitalinc.github.io/CompressAI/zoo.html (if time available, doubt I"m gonna do this) 
-- 
+- [ ] Implement the modified, regularized loss from here: https://interdigitalinc.github.io/CompressAI/zoo.html (if time available, doubt I"m gonna do this)
+- [ ] 
 ### Notes + Other References:
 - Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
 
