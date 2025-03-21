@@ -328,8 +328,10 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
 
         # 1) encoder
         if ae_model_name == "PNC16":
+            print("Using PNC16 Encoder")
             self.encoder = PNC16Encoder()
         elif ae_model_name == "PNC32":
+            print("Using PNC32 Encoder")    
             self.encoder = PNC32Encoder()
 
         #2 Feed forward zero-padded partial latents to LSTM. LSTM sees input_channels=total_channels 
@@ -343,8 +345,10 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         
         # 5) finally, decoder
         if ae_model_name == "PNC16":
+            print("Using PNC16 Decoder")
             self.decoder = PNC16Decoder()
         elif ae_model_name == "PNC32":
+            print("Using PNC32 Decoder")
             self.decoder = PNC32Decoder()
 
     def forward(self, x_seq, drop=0, eval_real=False):
