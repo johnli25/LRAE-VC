@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC16, PNC16_LSTM_AE, ConvLSTM_AE, ConvLSTM_Impute_AE, PNC_Autoencoder, PNC_256Unet_Autoencoder, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
+from models import PNC16, PNC32, ConvLSTM_AE, ConvLSTM_Impute_AE, PNC_Autoencoder, PNC_256Unet_Autoencoder, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
 from tqdm import tqdm
 import random
 import torchvision.utils as vutils
@@ -363,10 +363,10 @@ if __name__ == "__main__":
     # Example: pick your autoencoder model
     if args.model == "PNC16":
         model = PNC16()
-    elif args.model == "PNC16_lstm_ae":
-        model = PNC16_LSTM_AE(hidden_dim=128, num_layers=2)
     elif args.model == "conv_lstm_ae": # currently based on PNC16, which is a 16-feature/channel (for encode) model
-        model = ConvLSTM_AE(total_channels=16, hidden_channels=32, use_predictor=False)
+        model = ConvLSTM_AE(total_channels=16, hidden_channels=32, ae_model_name="PNC16")
+    elif args.model == "conv_lstm_PNC32_ae":
+        model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32")
 
     model = model.to(device)
     if torch.cuda.device_count() > 1:
@@ -404,18 +404,18 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
+    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
     # save
-    # if drops > 0:
-    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
-    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
-    # else: # no dropout OR original model
-    #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
-    #     print(f"Model saved as {args.model}_final_weights.pth")
+    if drops > 0:
+        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
+        print(f"Model saved as {args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
+    else: # no dropout OR original model
+        torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+        print(f"Model saved as {args.model}_final_weights.pth")
 
 
     # NOTE: for Experimental Evaluation
     # final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=drops) # constant number of drops
-    final_test_loss = evaluate_realistic(model, test_loader, criterion, device) # random number of drops
-    print(f"Final Test Loss For evaluation: {final_test_loss:.4f}")
+    # final_test_loss = evaluate_realistic(model, test_loader, criterion, device) # random number of drops
+    # print(f"Final Test Loss For evaluation: {final_test_loss:.4f}")
     

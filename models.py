@@ -175,68 +175,6 @@ class PNC32(nn.Module):
         y5 = self.decode(x2)  # (32, 32, 32) -> (3, 224, 224)
         return y5
 
-    
-# deprecated b/c isn't effective
-class PNC16_LSTM_AE(nn.Module):
-    def __init__(self, hidden_dim=1024, num_layers=3, bidirectional=True):
-        super().__init__()
-        self.encoder = PNC16Encoder()
-        self.decoder = PNC16Decoder()
-        
-        # Flattened dimension from (16, 32, 32)
-        self.feature_size = 16 * 32 * 32  # = 16384
-        
-        self.lstm = nn.LSTM(
-            input_size=self.feature_size,
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            batch_first=True,
-            bidirectional=bidirectional
-        )
-        
-        # Map LSTM output back to the same feature size
-        num_dirs = 2 if bidirectional else 1
-        # Replace single fully connected layer with multiple non-linear layers
-        self.fc = nn.Sequential(
-            nn.Linear(hidden_dim * num_dirs, 4096),
-            nn.ReLU(),
-            nn.Linear(4096, 8192),
-            nn.ReLU(),
-            nn.Linear(8192, self.feature_size)
-        )
-
-    def forward(self, x_seq):
-        """
-        x_seq shape: (batch_size, seq_len, 3, 224, 224)
-        Returns: (batch_size, seq_len, 3, 224, 224) -- reconstructed frames
-        """
-        bsz, seq_len, c, h, w = x_seq.shape
-        # Reshape for time-distributed encoding: (batch_size*seq_len, 3, 224, 224)
-        x_reshaped = x_seq.view(bsz * seq_len, c, h, w)
-        
-        # Encode each frame
-        encoded = self.encoder(x_reshaped)  # -> (batch_size*seq_len, 16, 32, 32)
-        
-        # Flatten each encoded frame
-        encoded = encoded.view(bsz, seq_len, -1)  # -> (batch_size, seq_len, feature_size)
-        
-        # Process sequence with LSTM
-        lstm_out, _ = self.lstm(encoded)   # -> (batch_size, seq_len, hidden_dim * num_dirs)
-        
-        # Map LSTM output to feature space via multi-layer fully connected bottleneck
-        lstm_out = self.fc(lstm_out)       # -> (batch_size, seq_len, feature_size)
-        
-        # Un-flatten the features for decoding
-        lstm_out = lstm_out.view(bsz * seq_len, 16, 32, 32)
-        
-        # Decode each frame
-        decoded = self.decoder(lstm_out)   # -> (batch_size*seq_len, 3, 224, 224)
-        
-        # Reshape back to sequence format: (batch_size, seq_len, 3, 224, 224)
-        decoded = decoded.view(bsz, seq_len, 3, 224, 224)
-        return decoded
-    
-
 
 class PNC16Encoder(nn.Module): # Conv Encoder
     def __init__(self):
@@ -275,6 +213,47 @@ class PNC16Decoder(nn.Module): # Conv Decoder
         y4 = y4 + y3
         y5 = self.final_layer(y4)            # -> (batch_size, 3, 224, 224)
         y5 = torch.clamp(y5, 0, 1)
+        return y5
+    
+
+class PNC32Encoder(nn.Module):
+    """
+    Encoder that maps an input image (3, 224, 224) to a latent space with 32 channels 
+    and spatial size 32x32, using the architecture of PNC32.
+    """
+    def __init__(self):
+        super(PNC32Encoder, self).__init__()
+        self.encoder1 = nn.Conv2d(3, 32, kernel_size=9, stride=7, padding=4)   # (3, 224, 224) -> (32, 32, 32)
+        self.encoder2 = nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1)   # (32, 32, 32) -> (32, 32, 32)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.relu(self.encoder1(x))
+        x = self.relu(self.encoder2(x))
+        return x
+
+class PNC32Decoder(nn.Module):
+    """
+    Decoder that reconstructs an image from a 32-channel latent representation with spatial
+    dimensions 32x32 to an output image (3, 224, 224) using skip connections.
+    """
+    def __init__(self):
+        super(PNC32Decoder, self).__init__()
+        self.decoder1 = nn.ConvTranspose2d(32, 64, kernel_size=9, stride=7, padding=4, output_padding=6)  # (32, 32, 32) -> (64, 224, 224)
+        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)                               # (64, 224, 224) -> (64, 224, 224)
+        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)                               # (64, 224, 224) -> (64, 224, 224)
+        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)                             # (64, 224, 224) -> (3, 224, 224)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        y1 = self.relu(self.decoder1(x))        # -> (64, 224, 224)
+        y2 = self.relu(self.decoder2(y1))         # -> (64, 224, 224)
+        y2 = y2 + y1                            # Skip connection
+        y3 = self.relu(self.decoder3(y2))         # -> (64, 224, 224)
+        y4 = self.relu(self.decoder3(y3))         # Another pass through decoder3
+        y4 = y4 + y3                            # Skip connection
+        y5 = self.final_layer(y4)               # -> (3, 224, 224)
+        y5 = torch.clamp(y5, min=0, max=1)        # Clamp output to [0, 1]
         return y5
 
 
@@ -342,14 +321,16 @@ class ConvLSTM(nn.Module):
     
 
 class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding for feature/channel dropouts
-    def __init__(self, total_channels, hidden_channels, use_predictor=False):
+    def __init__(self, total_channels, hidden_channels, ae_model_name):
         super().__init__()
         self.total_channels = total_channels
         self.hidden_channels = hidden_channels
-        self.use_predictor = use_predictor
 
         # 1) encoder
-        self.encoder = PNC16Encoder()
+        if ae_model_name == "PNC16":
+            self.encoder = PNC16Encoder()
+        elif ae_model_name == "PNC32":
+            self.encoder = PNC32Encoder()
 
         #2 Feed forward zero-padded partial latents to LSTM. LSTM sees input_channels=total_channels 
         self.conv_lstm = ConvLSTM(input_channels=total_channels, hidden_channels=hidden_channels)
@@ -359,15 +340,12 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             self.map_lstm2pred = nn.Conv2d(hidden_channels, total_channels, kernel_size=1, stride=1, padding=0)
         else:
             self.map_lstm2pred = None
-            
-        # 4) OPTIONAL predictor that uses LSTM's aggregated features
-        if use_predictor:
-            pass # implement later
-        else:
-            self.predictor = None 
         
         # 5) finally, decoder
-        self.decoder = PNC16Decoder() 
+        if ae_model_name == "PNC16":
+            self.decoder = PNC16Decoder()
+        elif ae_model_name == "PNC32":
+            self.decoder = PNC32Decoder()
 
     def forward(self, x_seq, drop=0, eval_real=False):
         """
@@ -435,59 +413,6 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             return recon, imputed_latents, None
 
     
-
-class ConvLSTM_Impute_AE(nn.Module): 
-    def __init__(self, total_channels, hidden_channels, use_predictor=False):
-        super().__init__()
-        self.total_channels = total_channels
-        self.hidden_channels = hidden_channels
-        self.use_predictor = use_predictor
-
-        self.encoder = PNC16Encoder()  # produces (batch, total_channels, 32, 32)
-        self.conv_lstm = ConvLSTM(input_channels=total_channels, hidden_channels=hidden_channels)
-        
-        # Map LSTM output to total_channels if needed.
-        if hidden_channels != total_channels:
-            self.map_lstm2dec = nn.Conv2d(hidden_channels, total_channels, kernel_size=1, stride=1, padding=0)
-        else:
-            self.map_lstm2dec = None
-
-        self.decoder = PNC16Decoder()  # decodes latent to (batch, 3, 224, 224)
-
-    def forward(self, x_seq, drop=0):
-        """
-        x_seq: (batch, seq_len, 3, 224, 224)
-        returns: (batch, seq_len, 3, 224, 224)
-        """
-        bsz, seq_len, _, _, _ = x_seq.shape
-        partial_list = []
-        for t in range(seq_len):
-            frame = x_seq[:, t]  # (batch, 3, 224, 224)
-            features = self.encoder(frame)  # -> (batch, total_channels, 32, 32)
-            if drop > 0:
-                features = features.clone()  # avoid in-place modification issues
-                features[:, -drop:, :, :] = 0.0  # simulate dropout by zeroing out last 'drop' channels
-            partial_list.append(features)
-
-        # Stack latents along the time dimension
-        latent_seq = torch.stack(partial_list, dim=1)  # (batch, seq_len, total_channels, 32, 32)
-        
-        # Step 3: Process through ConvLSTM to get the actually filled/imputed latent sequence
-        lstm_out = self.conv_lstm(latent_seq)
-        print("lstm_out.shape: ", lstm_out.shape)
-        if self.map_lstm2dec is not None:
-            # Map the LSTM output from hidden channels to total channels
-            lstm_out = self.map_lstm2dec(lstm_out.view(-1, self.hidden_channels, 32, 32)) # convert from (batch, seq_len, hidden_channels, 32, 32) to (batch*seq_len, total_channels, 32, 32) and then map to total_channels
-            lstm_out = lstm_out.view(bsz, seq_len, self.total_channels, 32, 32) # and then reshape back to (batch, seq_len, total_channels, 32, 32)
-
-        # Step 4: Decode each timestep frame using the filled latent representation
-        outputs = []
-        for t in range(seq_len):
-            h_t = lstm_out[:, t]
-            recon_frame = self.decoder(h_t)  # (batch, 3, 224, 224)
-            outputs.append(recon_frame.unsqueeze(1)) # add time dimension: (batch, 3, 224, 224) -> (batch, 1, 3, 224, 224)
-        return torch.cat(outputs, dim=1)  # (batch, seq_len, 3, 224, 224)
-        
 
 class TestNew(nn.Module):
     def __init__(self):
