@@ -396,7 +396,7 @@ if __name__ == "__main__":
 
     if args.model_path:
         checkpoint = torch.load(args.model_path, map_location=device)
-        checkpoint = convertFromDataParallelNormal(checkpoint)
+        checkpoint = convertFromNormalToDataParallel(checkpoint)
         model.load_state_dict(checkpoint)
         print(f"Loaded model weights from {args.model_path}")
 

@@ -367,6 +367,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         
             # 2) Randomly drop tail channels/features
             if drop > 0 or eval_real:
+                # print("Drop = ", drop)
                 features = features.clone()  # avoid in-place modifications
                 if self.training or eval_real:
                     # Training: randomly drop 0 to `drop` tail channels per sample.
