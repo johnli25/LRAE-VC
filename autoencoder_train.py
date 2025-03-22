@@ -71,8 +71,8 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
 
     for epoch in range(num_epochs):
         # increase the tail length
-        if max_tail_length and epoch % 2 == 0:
-            drops = min(drops + 1, max_tail_length)
+        if max_tail_length and epoch % 3 == 0:
+            drops = min(drops + 2, max_tail_length)
             print(f"Epoch {epoch}: Increasing tail length to {drops}")
 
         # Train the model
@@ -224,6 +224,7 @@ if __name__ == "__main__":
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
         return parser.parse_args()
+    
     args = parse_args()
 
     ## Hyperparameters
