@@ -71,8 +71,8 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
 
     for epoch in range(num_epochs):
         # increase the tail length
-        if max_tail_length and epoch % 3 == 0:
-            drops = min(drops + 2, max_tail_length)
+        if max_tail_length and epoch % 2 == 0:
+            drops = min(drops + 1, max_tail_length)
             print(f"Epoch {epoch}: Increasing tail length to {drops}")
 
         # Train the model
@@ -102,9 +102,12 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
         # Save the best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            if max_tail_length: torch.save(model.state_dict(), f"{model_name}_best_validation_w_random_drops.pth")
-            else: torch.save(model.state_dict(), f"{model_name}_best_validation_no_dropouts.pth")
-            print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
+            if max_tail_length: 
+                torch.save(model.state_dict(), f"{model_name}_best_validation_w_random_drops.pth")
+                print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {model_name}_best_validation_w_random_drops.pth")
+            else: 
+                torch.save(model.state_dict(), f"{model_name}_best_validation_no_dropouts.pth")
+                print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {model_name}_best_validation_no_dropouts.pth")
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
@@ -229,7 +232,7 @@ if __name__ == "__main__":
 
     ## Hyperparameters
     num_epochs = args.epochs
-    batch_size = 64
+    batch_size = 32
     learning_rate = 1e-3
     img_height, img_width = 224, 224 # NOTE: Dependent on autoencoder architecture!!
     path = "TUCF_sports_action_224x224/" # NOTE: already resized to 224x224 (so not really adaptable), but faster
@@ -293,7 +296,7 @@ if __name__ == "__main__":
 
     if args.model == "PNC32":
         model = PNC32()
-        # max_tail_length = 12
+        max_tail_length = 32
 
     if args.model == "TestNew":
         model = TestNew()
