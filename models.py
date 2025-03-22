@@ -375,7 +375,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                         random_drop = torch.randint(low=0, high=drop + 1, size=(1,)).item()
                         if eval_real:
                             current_drop.append(random_drop)
-                        # print("random_drop:", random_drop)
+                        print("random_drop:", random_drop)
                         if random_drop > 0:
                             features[i, -random_drop:, :, :] = 0.0
                 else:
@@ -413,12 +413,13 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         recon = torch.cat(outputs, dim=1)  # (batch, seq_len, 3, 224, 224)
 
         if eval_real:
-            return recon, imputed_latents, drop_levels
+            drop_levels_tensor = torch.tensor(drop_levels, device=x_seq.device)
+            return recon, imputed_latents, drop_levels_tensor
         else:
             return recon, imputed_latents, None
 
-    
 
+    
 class TestNew(nn.Module):
     def __init__(self):
         super(TestNew, self).__init__()
