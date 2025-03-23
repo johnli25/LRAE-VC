@@ -22,12 +22,6 @@ test_img_names = {
     "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
-# test_img_names = {
-#     "diving_7", "diving_8", "golf_front_7", "golf_front_8", "kick_front_8", "kick_front_9",
-#     "lifting_5", "lifting_6", "riding_horse_8", "riding_horse_9", "running_7", "running_8",
-#     "running_9", "skating_8", "skating_9", "swing_bench_7", "swing_bench_8", "swing_bench_9"
-# }
-
 
 # NOTE: uncomment below if you're using UCF101
 
@@ -389,4 +383,3 @@ if __name__ == "__main__":
                 for j in range(inputs.size(0)):
                     output_np = outputs[j].permute(1, 2, 0).cpu().numpy()  # (image_h, image_w, 3)
                     plt.imsave(os.path.join(output_path, filenames[j]), output_np)
-
