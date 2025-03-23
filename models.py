@@ -375,7 +375,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                         random_drop = torch.randint(low=0, high=drop + 1, size=(1,)).item()
                         if eval_real:
                             current_drop.append(random_drop)
-                        print("random_drop:", random_drop)
+                        # print("random_drop:", random_drop)
                         if random_drop > 0:
                             features[i, -random_drop:, :, :] = 0.0
                 else:
