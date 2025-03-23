@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC_Autoencoder, PNC_256Unet_Autoencoder, PNC16, PNC32, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
+from models import PNC_Autoencoder, PNC16, PNC32, TestNew, TestNew2, TestNew3, LRAE_VC_Autoencoder
 import random
 
 # NOTE: uncomment below if you're using UCF Sports Action 
@@ -55,7 +55,7 @@ class ImageDataset(Dataset):
         return image, self.img_names[idx]  # (image, same_image_as_ground_truth, img filename)
 
 
-def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length):
+def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length, quantize=False):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
 
@@ -79,7 +79,7 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
             inputs = inputs.to(device)
 
             optimizer.zero_grad()
-            outputs = model(inputs, tail_len) 
+            outputs = model(x=inputs, tail_length=tail_len, quantize_latent=quantize)
             loss = criterion(outputs, inputs)
             loss.backward()
             optimizer.step()
@@ -118,7 +118,7 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
     print(f"Final Test Loss: {test_loss:.4f}")
 
 
-def eval_autoencoder(model, dataloader, criterion, device, max_tail_length):
+def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None, quantize=False):
     model.eval()
     test_loss = 0
     with torch.no_grad():
@@ -127,73 +127,11 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length):
             # tail_len = torch.randint(0, max_tail_length, (1,)).item() if max_tail_length else None
             # print("Eval tail length: ", tail_len)
             inputs = inputs.to(device)
-            outputs = model(inputs, 0) 
+            outputs = model(x=inputs, tail_length=max_tail_length, quantize_latent=quantize)
             loss = criterion(outputs, inputs)
             test_loss += loss.item() * inputs.size(0)
 
     return test_loss / len(dataloader.dataset)
-
-
-def train_autoencoder_with_classification(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name):
-    best_val_loss = float('inf')
-    train_losses, val_losses = [], []
-
-    for epoch in range(num_epochs):
-        # Train phase
-        model.train()
-        train_loss = 0
-        for inputs, _, filenames in train_loader:
-            labels = torch.tensor(get_labels_from_filename(filenames))
-
-            inputs, labels = inputs.to(device), labels.to(device)
-
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-
-            train_loss += loss.item() * inputs.size(0)
-
-        train_loss /= len(train_loader.dataset)
-        train_losses.append(train_loss)
-
-        # Validation phase
-        val_loss = test_autoencoder_with_classification(model, val_loader, device)
-        val_losses.append(val_loss)
-
-        print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
-
-        # Save best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), f"{model_name}_with_classification_best_validation.pth")
-            print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved.")
-
-
-    plot_train_val_loss(train_losses, val_losses)
-    # Final Test
-    accuracy = test_autoencoder_with_classification(model, test_loader, device)
-    print(f"Final Test Accuracy: {accuracy:.2f}%")
-    # Save final model
-    torch.save(model.state_dict(), f"{model_name}_with_classification_final.pth")
-
-
-def test_autoencoder_with_classification(model, dataloader, device):
-    model.eval()
-    correct, total = 0, 0
-    with torch.no_grad():
-        for inputs, _, filenames in dataloader:
-            labels = torch.tensor(get_labels_from_filename(filenames))
-            inputs, labels = inputs.to(device), labels.to(device)
-
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    accuracy = 100 * correct / total if total > 0 else 0
-    return accuracy
 
 
 def plot_train_val_loss(train_losses, val_losses):
@@ -220,6 +158,7 @@ if __name__ == "__main__":
                             help="Model to train")
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
+        parser.add_argument("--quantize", default=False, action="store_true", help="Choose to use quantization")
         return parser.parse_args()
     
     args = parse_args()
@@ -290,7 +229,7 @@ if __name__ == "__main__":
 
     if args.model == "PNC32":
         model = PNC32()
-        max_tail_length = 32
+        # max_tail_length = 32
 
     if args.model == "TestNew":
         model = TestNew()
@@ -313,30 +252,8 @@ if __name__ == "__main__":
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
-    train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length) # max_tail_length = None or 10 (in the case of PNC)
+    train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length, quantize=args.quantize) # max_tail_length = None or 10 (in the case of PNC)
 
-
-    if args.model == "PNC_with_classification":
-        model_autoencoder = PNC_Autoencoder().to(device)
-        model_autoencoder.load_state_dict(torch.load("PNC_final_no_dropouts.pth"))
-        model_autoencoder.eval()
-
-        model_classifier = PNC_with_classification(model_autoencoder, num_classes=8).to(device)
-
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model_classifier.classifier.parameters(), lr=learning_rate)
-
-        train_autoencoder_with_classification(
-            model=model_classifier,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            test_loader=test_loader,
-            criterion=criterion,
-            optimizer=optimizer,
-            device=device,
-            num_epochs=num_epochs,
-            model_name="PNC_with_classification"
-        )
 
     # Save images generated by DECODER ONLY! 
     output_path = "output_test_imgs_post_training/"
@@ -344,38 +261,13 @@ if __name__ == "__main__":
         print(f"Creating directory: {output_path}")
         os.makedirs(output_path)
 
-    if args.model == "PNC_with_classification":
-        model_classifier.eval()  # Put classifier in eval mode
-        model_autoencoder.eval()  # Put autoencoder in eval mode
-        with torch.no_grad():
-            correct, total = 0, 0
-            for i, (inputs, _, filenames) in enumerate(test_loader):
-                inputs = inputs.to(device)
-                outputs = model_classifier(inputs)  # Forward pass through classifier
 
-                _, predicted = torch.max(outputs, 1)
-
-                ground_truth = get_labels_from_filename(filenames)
-                ground_truth = torch.tensor(ground_truth).to(device)
-
-                # Print predictions
-                # for filename, pred, gt in zip(filenames, predicted.cpu().numpy(), ground_truth.cpu().numpy()):
-                #     print(f"Frame: {filename}, Predicted Class: {pred}, Ground Truth: {gt}")
-                correct += (predicted == ground_truth).sum().item() # Update accuracy
-                total += ground_truth.size(0)
-
-            # Final accuracy
-            accuracy = 100 * correct / total if total > 0 else 0
-            print(f"\nTotal Correct: {correct}/{total}")
-            print(f"Classification Accuracy: {accuracy:.2f}%")
-
-    else: # no classification! --> testing Reconstruction ONLY
         model.eval()  # Put the autoencoder in eval mode
         with torch.no_grad():
             for i, (inputs, filenames) in enumerate(test_loader):
                 inputs = inputs.to(device)
                 num_dropped_features = 0 # NOTE: John, you manually set this constant during experimentation/evaluation? 
-                outputs = model(inputs, num_dropped_features)  # Forward pass through autoencoder
+                outputs = model(inputs, num_dropped_features, args.quantize)  # Forward pass through autoencoder
 
                 # outputs is (batch_size, 3, image_h, image_w)
                 print(f"Batch {i+1}/{len(test_loader)}, Output shape: {outputs.shape}")
