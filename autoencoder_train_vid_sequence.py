@@ -8,10 +8,11 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC16, PNC32, ConvLSTM_AE, PNC_Autoencoder, PNC_256Unet_Autoencoder, TestNew, TestNew2, TestNew3, PNC_with_classification, LRAE_VC_Autoencoder
+from models import PNC16, PNC32, ConvLSTM_AE, PNC_Autoencoder, TestNew, TestNew2, TestNew3, LRAE_VC_Autoencoder
 from tqdm import tqdm
 import random
 import torchvision.utils as vutils
+import zlib 
 
 
 # NOTE: uncomment below if you're using UCF Sports Action 
@@ -222,9 +223,24 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0):
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
             frames_tensor = frames.to(device)
-            outputs, _, _ = ae_model(frames_tensor, drop) # NOTE: returns reconstructed frames of shape (batch_size, seq_len, 3, 224, 224) AND imputed latents of shape (batch_size, seq_len, 16, 32, 32)
+            outputs, latents, _ = ae_model(frames_tensor, drop) # NOTE: returns reconstructed frames of shape (batch_size, seq_len, 3, 224, 224) AND imputed latents of shape (batch_size, seq_len, 16, 32, 32)
             loss = criterion(outputs, frames_tensor)
             running_loss += loss.item()
+
+
+            ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
+            frame_latent = latents[0][0] # shape = (16, 32, 32)
+
+            features_cpu = frame_latent.detach().cpu().numpy()
+            features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
+
+            compressed = zlib.compress(features_uint8.tobytes())    
+            latent_num_bytes = len(compressed)
+
+            print(f"[Simulated Compression] Frame 0 compressed size: {latent_num_bytes} bytes "
+                f"(Original shape: {tuple(frame_latent.shape)})")
+            ##### end intermission function
+
             
             # Iterate over every sequence in the batch and every frame in the sequence.
             if save_sample:
@@ -415,7 +431,7 @@ if __name__ == "__main__":
 
 
     # NOTE: for Experimental Evaluation
-    # final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=drops) # constant number of drops
-    final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
+    final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=drops) # constant number of drops
+    # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
     print(f"Final Test Loss For evaluation: {final_test_loss:.4f}")
     
