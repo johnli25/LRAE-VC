@@ -297,7 +297,7 @@ if __name__ == "__main__":
     def parse_args():
         parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
         parser.add_argument("--model", type=str, required=True,
-                            choices=["PNC", "PNC16", "PNC32", "conv_lstm_ae", "conv_lstm_PNC32_ae",
+                            choices=["PNC", "PNC16", "PNC32", "conv_lstm_PNC16_ae", "conv_lstm_PNC32_ae",
                                     "LRAE-VC", "TestNew", "TestNew2", "TestNew3"],
                             help="Model to train")
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
@@ -379,7 +379,7 @@ if __name__ == "__main__":
     # Example: pick your autoencoder model
     if args.model == "PNC16":
         model = PNC16()
-    elif args.model == "conv_lstm_ae": # currently based on PNC16, which is a 16-feature/channel (for encode) model
+    elif args.model == "conv_lstm_PNC16_ae": # currently based on PNC16, which is a 16-feature/channel (for encode) model
         model = ConvLSTM_AE(total_channels=16, hidden_channels=32, ae_model_name="PNC16")
     elif args.model == "conv_lstm_PNC32_ae":
         model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32")
@@ -422,12 +422,12 @@ if __name__ == "__main__":
 
     # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
     # # save
-    # if drops > 0:
-    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
-    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_lambda{args.lambda_val}_final_weights.pth")
-    # else: # no dropout OR original model
-    #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
-    #     print(f"Model saved as {args.model}_final_weights.pth")
+    if drops > 0:
+        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
+        print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    else: # no dropout OR original model
+        torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+        print(f"Model saved as {args.model}_final_weights.pth")
 
 
     # NOTE: for Experimental Evaluation
