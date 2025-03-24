@@ -137,7 +137,7 @@ def plot_train_val_loss(train_losses, val_losses):
     plt.show()
 
 
-def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0, lambda_val=0.1):
+def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0, quantize=False):
     train_losses, val_losses = [], []
     best_val_loss = float('inf')
     os.makedirs("ae_lstm_output_train", exist_ok=True)
@@ -158,22 +158,11 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch}/{num_epochs} - Training", unit="batch")):
             frames_tensor = frames.to(device)
             optimizer.zero_grad()
-            bsz, seq_len, _, _, _ = frames_tensor.size()
-            with torch.no_grad():
-                target_latents_list = []
-                for t in range(seq_len):
-                    frame = frames_tensor[:, t, :, :, :] # (batch, 3, 224, 224)
-                    if hasattr(ae_model, "module"): target_latents = ae_model.module.encoder(frame)
-                    else: target_latents = ae_model.encoder(frame)
-                    target_latents_list.append(target_latents)
 
-                target_latents = torch.stack(target_latents_list, dim=1) # traget_latents output shape = (batch, seq_len, 16, 32, 32)
+            drop_val = random.randint(0, drops) if max_drops > 0 else 0 # TODO: INVESTIGATE this line? Is this necessary at all? OR should I directly pass in 'drops'?
+            recon, _, _ = ae_model(x_seq=frames_tensor, drop=drop_val, quantize=quantize)  # -> (batch_size, seq_len, 3, 224, 224)
 
-            drop_val = random.randint(0, drops) if max_drops > 0 else 0
-            recon, imputed_latents, _ = ae_model(frames_tensor, drop_val)  # -> (batch_size, seq_len, 3, 224, 224)
-            recon_loss = criterion(recon, frames_tensor)
-            latent_loss = nn.functional.mse_loss(target_latents, imputed_latents)
-            total_loss = recon_loss + lambda_val * latent_loss
+            total_loss = criterion(recon, frames_tensor)
             total_loss.backward()
             optimizer.step()
             
@@ -182,7 +171,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
         avg_train_loss = epoch_loss / len(train_loader)
         train_losses.append(avg_train_loss)
         
-        val_loss = evaluate(ae_model, val_loader, criterion, device, save_sample=None) # set to "val" if needed
+        val_loss = evaluate(ae_model, val_loader, criterion, device, save_sample=None, quantize=quantize) # set to "val" if needed
         val_losses.append(val_loss)
 
         # Check and update best validation loss for the current dropout level
@@ -191,11 +180,11 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
             if drops not in best_val_losses or val_loss < best_val_losses[drops]:
                 best_val_losses[drops] = val_loss
                 if hasattr(ae_model, "module"):
-                    torch.save(ae_model.module.state_dict(), f"{model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
-                    print(f"Saved model weights for {model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
-                else: # regularization enabled
-                    torch.save(ae_model.state_dict(), f"{model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
-                    print(f"Saved model weights for {model_name}_drop_{drops}_lambda{lambda_val}_features_best_val_weights.pth")
+                    torch.save(ae_model.module.state_dict(), f"{model_name}_drop_{drops}_features_best_val_weights.pth")
+                    print(f"Saved model weights for {model_name}_drop_{drops}__features_best_val_weights.pth")
+                else:
+                    torch.save(ae_model.state_dict(), f"{model_name}_drop_{drops}_features_best_val_weights.pth")
+                    print(f"Saved model weights for {model_name}_drop_{drops}_features_best_val_weights.pth")
                 print(f"New best model for dropped features = {drops} saved at epoch {epoch} with validation loss: {val_loss:.4f}")
         else: # for NO dropout 
             if val_loss < best_val_loss:
@@ -205,16 +194,15 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
             
         print(f"Epoch [{epoch}/{num_epochs}] - Train Loss: {avg_train_loss:.4f}, Val Loss: {val_loss:.4f}")
             
-
     # plot_train_val_loss(train_losses, val_losses)
-
+        
     # Final test/evaluation
-    test_loss = evaluate(ae_model, test_loader, criterion, device, save_sample="test", drop=0) # do constant number of drops 
+    test_loss = evaluate(ae_model, test_loader, criterion, device, save_sample="test", drop=0, quantize=quantize) # do constant number of drops 
     print(f"Test Loss: {test_loss:.4f}")
 
 
 
-def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0):
+def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, quantize=False):
     ae_model.eval()
     running_loss = 0.0
     os.makedirs("ae_lstm_output_test", exist_ok=True)
@@ -223,22 +211,27 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0):
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
             frames_tensor = frames.to(device)
-            outputs, latents, _ = ae_model(frames_tensor, drop) # NOTE: returns reconstructed frames of shape (batch_size, seq_len, 3, 224, 224) AND imputed latents of shape (batch_size, seq_len, 16, 32, 32)
+            print("quantize: ", quantize)
+            outputs, _, _ = ae_model(x_seq=frames_tensor, drop=drop, quantize=quantize) # NOTE: returns reconstructed frames of shape (batch_size, seq_len, 3, 224, 224) AND imputed latents of shape (batch_size, seq_len, 16, 32, 32)
             loss = criterion(outputs, frames_tensor)
             running_loss += loss.item()
 
-
-            ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
-            frame_latent = latents[0][0] # shape = (16, 32, 32)
-
-            features_cpu = frame_latent.detach().cpu().numpy()
-            features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
-
-            compressed = zlib.compress(features_uint8.tobytes())    
-            latent_num_bytes = len(compressed)
-
-            print(f"[Simulated Compression] Frame 0 for video_frame {prefix_[0] + str(start_idx_)} compressed size: {latent_num_bytes} bytes "
-                f"(Original shape: {tuple(frame_latent.shape)})")
+            
+            ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
+            frame_latent = model.module.encoder(frames_tensor[0][0]) # encode the first frame of the first video sequence in batch
+            if quantize:
+                features_cpu = frame_latent.detach().cpu().numpy()
+                features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
+                compressed = zlib.compress(features_uint8.tobytes())
+                latent_num_bytes = len(compressed)
+                print(f"[Simulated Compression] Frame 0 compressed size (quantized to uint8): {latent_num_bytes} bytes "
+                    f"(Original shape: {tuple(frame_latent.shape)})")
+            else:
+                features_cpu = frame_latent.detach().cpu().numpy().astype(np.float32)
+                compressed = zlib.compress(features_cpu.tobytes())
+                latent_num_bytes = len(compressed)
+                print(f"[Simulated Compression] Frame 0 compressed size (float32): {latent_num_bytes} bytes "
+                    f"(Original shape: {tuple(frame_latent.shape)})")
             ##### end intermission function
 
             
@@ -263,7 +256,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0):
     return running_loss / len(dataloader)
 
 
-def evaluate_realistic(ae_model, dataloader, criterion, device, input_drop=16):
+def evaluate_realistic(ae_model, dataloader, criterion, device, input_drop=32, quantize=False):
     ae_model.eval()
     running_loss = 0.0
     os.makedirs("ae_lstm_output_test_realistic", exist_ok=True)
@@ -271,7 +264,7 @@ def evaluate_realistic(ae_model, dataloader, criterion, device, input_drop=16):
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
             frames_tensor = frames.to(device)
-            outputs, _, drop_levels = ae_model(frames_tensor, input_drop, eval_real=True) 
+            outputs, _, drop_levels = ae_model(frames_tensor, input_drop, eval_real=True, quantize=quantize) # NOTE: returns reconstructed frames of shape (batch_size, seq_len, 3, 224, 224) AND imputed latents of shape (batch_size, seq_len, 16, 32, 32)
             loss = criterion(outputs, frames_tensor)
             running_loss += loss.item()
 
@@ -304,6 +297,7 @@ if __name__ == "__main__":
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
         parser.add_argument("--drops", type=int, default=0, help="MAX dropout to enforce")
         parser.add_argument("--lambda_val", type=float, default=0.0, help="Weight for latent loss")
+        parser.add_argument("--quantize", action="store_true", help="Quantize latent features")
         return parser.parse_args()
 
     args = parse_args()
@@ -420,18 +414,17 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
-    # # save
-    if drops > 0:
-        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
-        print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
-    else: # no dropout OR original model
-        torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
-        print(f"Model saved as {args.model}_final_weights.pth")
+    # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, quantize=args.quantize)
+    # if drops > 0:
+    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    # else: # no dropout OR original model
+    #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+    #     print(f"Model saved as {args.model}_final_weights.pth")
 
 
     # NOTE: for Experimental Evaluation
-    final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=drops) # constant number of drops
+    final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=drops, quantize=args.quantize) # constant number of drops
     # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
     print(f"Final Test Loss For evaluation: {final_test_loss:.4f}")
     

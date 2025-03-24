@@ -163,7 +163,7 @@ class PNC32(nn.Module):
 
         # Quantization: simulate 8-bit quantization on the latent
         if quantize_latent:
-            x2 = self.quantize(x2, levels=256) # NOTE: levels=256 still maintains range [0,1] for x2; it just quantizes the values to 256 levels.
+            x2 = self.quantize(x2, levels=16) # NOTE: levels=256 still maintains range [0,1] for x2; it just quantizes the values to 256 levels.
 
         # Decoder
         y5 = self.decode(x2)  # (32, 32, 32) -> (3, 224, 224)
@@ -178,21 +178,6 @@ class PNC32(nn.Module):
         x_clamped = torch.clamp(x, 0, 1)
         x_quantized = torch.round(x_clamped * (levels - 1)) / (levels - 1)
         return x_quantized
-
-    def simulate_entropy_coding(self, x, levels=256):
-        """
-        Simulate entropy coding by quantizing the latent, converting it to a uint8 numpy array,
-        and then compressing it with zlib. Returns the size (in bytes) of the compressed latent.
-        Note: This is non-differentiable and intended only for evaluation/simulation.
-        """
-        # x_q = self.quantize(x, levels)
-        # Convert tensor to numpy array. Expect x_q to be in [0,1].
-        x_np = x_q.detach().cpu().numpy()
-        # Scale to [0, 255] and convert to uint8.
-        # x_uint8 = (x_np * 255).astype(np.uint8)
-        # Compress using zlib.
-        compressed = zlib.compress(x_np.tobytes())
-        return len(compressed)
     
 
 
@@ -371,7 +356,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             print("Using PNC32 Decoder")
             self.decoder = PNC32Decoder()
 
-    def forward(self, x_seq, drop=0, eval_real=False):
+    def forward(self, x_seq, drop=0, eval_real=False, quantize=False):
         """
         x_seq: (batch_size, seq_len, 3, 224, 224)   
         returns (batch_size, seq_len, 3, 224, 224) reconstructed video frames/imgs sequence
@@ -401,6 +386,9 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                 else:
                     # Evaluation: drop a constant number of tail channels (e.g., exactly 'drop' channels)
                     features[:, -drop:, :, :] = 0.0
+
+            if quantize:
+                features = self.quantize(features, levels=8)
 
             if eval_real: # if eval_real, append drop levels for each sample
                 drop_levels.append(current_drop)
@@ -437,6 +425,16 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             return recon, imputed_latents, drop_levels_tensor
         else:
             return recon, imputed_latents, None
+        
+    def quantize(self, x, levels=256):  
+        """
+        Simulate quantization by clamping x to [0,1] and then rounding to levels-1 steps.
+        For optimal reconstruction quality, you should consider using quantization-aware training.
+        """
+        # For simplicity, assume x is roughly in [0, 1]. Otherwise, consider a learned scale.
+        x_clamped = torch.clamp(x, 0, 1)
+        x_quantized = torch.round(x_clamped * (levels - 1)) / (levels - 1)
+        return x_quantized
 
 
     
