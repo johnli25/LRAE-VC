@@ -163,7 +163,7 @@ class PNC32(nn.Module):
 
         # Quantization: simulate 8-bit quantization on the latent
         if quantize_latent:
-            latent = self.quantize(latent, levels=256)
+            x2 = self.quantize(x2, levels=256) # NOTE: levels=256 still maintains range [0,1] for x2; it just quantizes the values to 256 levels.
 
         # Decoder
         y5 = self.decode(x2)  # (32, 32, 32) -> (3, 224, 224)

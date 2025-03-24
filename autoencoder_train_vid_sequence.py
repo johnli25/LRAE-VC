@@ -237,7 +237,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0):
             compressed = zlib.compress(features_uint8.tobytes())    
             latent_num_bytes = len(compressed)
 
-            print(f"[Simulated Compression] Frame 0 compressed size: {latent_num_bytes} bytes "
+            print(f"[Simulated Compression] Frame 0 for video_frame {prefix_[0] + str(start_idx_)} compressed size: {latent_num_bytes} bytes "
                 f"(Original shape: {tuple(frame_latent.shape)})")
             ##### end intermission function
 
