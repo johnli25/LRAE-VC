@@ -98,8 +98,8 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             if max_tail_length: 
-                torch.save(model.state_dict(), f"{model_name}_best_validation_w_random_drops.pth")
-                print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {model_name}_best_validation_w_random_drops.pth")
+                torch.save(model.state_dict(), f"{model_name}_best_validation_w_taildrops.pth")
+                print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {model_name}_best_validation_w_taildrops.pth")
             else: 
                 torch.save(model.state_dict(), f"{model_name}_best_validation_no_dropouts.pth")
                 print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {model_name}_best_validation_no_dropouts.pth")
@@ -110,8 +110,8 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
 
     # Save final model
     if max_tail_length: 
-        torch.save(model.state_dict(), f"{model_name}_final_w_random_drops.pth")
-        print(f"Final model saved as {model_name}_final_w_random_drops.pth")
+        torch.save(model.state_dict(), f"{model_name}_final_w_taildrops.pth")
+        print(f"Final model saved as {model_name}_final_w_taildrops.pth")
     else: torch.save(model.state_dict(), f"{model_name}_final_no_dropouts.pth")
 
     # Final Test: test_autoencoder()
