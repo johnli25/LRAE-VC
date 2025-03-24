@@ -134,10 +134,10 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None,
             ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
             frame_latent = model.module.encode(inputs[0]) # .module b/c of DataParallel model
 
-            features_cpu = frame_latent.detach().cpu().numpy()
-            features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
+            features_cpu = frame_latent.detach().cpu().numpy().astype(np.float32)
+            # features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
 
-            compressed = zlib.compress(features_uint8.tobytes())    
+            compressed = zlib.compress(features_cpu.tobytes())    
             latent_num_bytes = len(compressed)
 
             print(f"[Simulated Compression] Frame 0 compressed size: {latent_num_bytes} bytes "

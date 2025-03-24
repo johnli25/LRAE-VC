@@ -185,13 +185,13 @@ class PNC32(nn.Module):
         and then compressing it with zlib. Returns the size (in bytes) of the compressed latent.
         Note: This is non-differentiable and intended only for evaluation/simulation.
         """
-        x_q = self.quantize(x, levels)
+        # x_q = self.quantize(x, levels)
         # Convert tensor to numpy array. Expect x_q to be in [0,1].
         x_np = x_q.detach().cpu().numpy()
         # Scale to [0, 255] and convert to uint8.
-        x_uint8 = (x_np * 255).astype(np.uint8)
+        # x_uint8 = (x_np * 255).astype(np.uint8)
         # Compress using zlib.
-        compressed = zlib.compress(x_uint8.tobytes())
+        compressed = zlib.compress(x_np.tobytes())
         return len(compressed)
     
 
