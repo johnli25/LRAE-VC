@@ -151,7 +151,7 @@ class PNC32(nn.Module):
         y5 = torch.clamp(y5, min=0, max=1)  # Normalize output to [0, 1]
         return y5
 
-    def forward(self, x, tail_length=None, quantize_latent=False):
+    def forward(self, x, tail_length=None, quantize_level=False):
         # Encoder
         x2 = self.encode(x)  # (3, 224, 224) -> (32, 32, 32)
         if tail_length is not None:
@@ -162,8 +162,8 @@ class PNC32(nn.Module):
             x2[:, tail_start:, :, :] = 0
 
         # Quantization: simulate 8-bit quantization on the latent
-        if quantize_latent:
-            x2 = self.quantize(x2, levels=16) # NOTE: levels=256 still maintains range [0,1] for x2; it just quantizes the values to 256 levels.
+        if quantize_level > 0:
+            x2 = self.quantize(x2, levels=8) # NOTE: levels=256 still maintains range [0,1] for x2; it just quantizes the values to 256 levels.
 
         # Decoder
         y5 = self.decode(x2)  # (32, 32, 32) -> (3, 224, 224)
@@ -288,14 +288,15 @@ class ConvLSTMCell(nn.Module):
 
         # Split the gates into input, forget, cell, and output gates
         chunk = self.hidden_channels
-        i = torch.sigmoid(gates[:, 0:chunk])
-        f = torch.sigmoid(gates[:, chunk:2*chunk])
-        o = torch.sigmoid(gates[:, 2*chunk:3*chunk])
-        g = torch.tanh(gates[:, 3*chunk:4*chunk])
+        i = torch.sigmoid(gates[:, 0:chunk]) # input gate determines how much of the new input to --> cell state
+        f = torch.sigmoid(gates[:, chunk:2*chunk]) # Decides what information to discard from the previous cell state.
+        o = torch.sigmoid(gates[:, 2*chunk:3*chunk]) # Controls how much of the cell state should be exposed as the hidden state (output) for current time step.
+        g = torch.tanh(gates[:, 3*chunk:4*chunk]) # Candidate Cell State: Represents the new info that could be added to the cell state.
 
         # Update cell state and hidden state
-        c = f * c + i * g
-        h = o * torch.tanh(c)
+        c = f * c + i * g # Acts as the “memory” of the cell, carrying LONG-TERM info 
+        h = o * torch.tanh(c) # # Hidden State: acts as output of the LSTM cell. It is used both to produce the cell’s final output and to serve as part of the input to the next time step.
+        
         return h, c
     
 
@@ -319,6 +320,7 @@ class ConvLSTM(nn.Module):
 
         for t in range(seq_len):
             x_t = x_seq[:, t] # extracts the t-th frame
+            
             h, c = self.cell(x_t, h, c)  # update hidden and cell states
             outputs.append(h.unsqueeze(1)) # NOTE: append the hidden state for this time step. unsqueeze(1) b/c we want to add a new dimension for time!!
 
@@ -387,8 +389,8 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                     # Evaluation: drop a constant number of tail channels (e.g., exactly 'drop' channels)
                     features[:, -drop:, :, :] = 0.0
 
-            if quantize:
-                features = self.quantize(features, levels=8)
+            if quantize > 0:
+                features = self.quantize(features, levels=quantize)
 
             if eval_real: # if eval_real, append drop levels for each sample
                 drop_levels.append(current_drop)

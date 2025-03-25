@@ -140,10 +140,10 @@ def plot_train_val_loss(train_losses, val_losses):
 def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0, quantize=False):
     train_losses, val_losses = [], []
     best_val_loss = float('inf')
-    os.makedirs("ae_lstm_output_train", exist_ok=True)
+    # os.makedirs("ae_lstm_output_train", exist_ok=True)
     best_val_losses = {}
     if max_drops > 0: 
-        drops = -1  # should be 1 less than the drops you ACTUALLY want to start at
+        drops = 24  # should be 1 less than the drops you ACTUALLY want to start at
     
     for epoch in range(num_epochs):
         # steadily increase the max # of drops every 2 epochs
@@ -206,7 +206,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
     ae_model.eval()
     running_loss = 0.0
     os.makedirs("ae_lstm_output_test", exist_ok=True)
-    os.makedirs("ae_lstm_output_val", exist_ok=True)
+    # os.makedirs("ae_lstm_output_val", exist_ok=True)
 
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
@@ -219,7 +219,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
             
             ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
             frame_latent = model.module.encoder(frames_tensor[0][0]) # encode the first frame of the first video sequence in batch
-            if quantize:
+            if quantize > 0:
                 features_cpu = frame_latent.detach().cpu().numpy()
                 features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
                 compressed = zlib.compress(features_uint8.tobytes())
@@ -297,7 +297,8 @@ if __name__ == "__main__":
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
         parser.add_argument("--drops", type=int, default=0, help="MAX dropout to enforce")
         parser.add_argument("--lambda_val", type=float, default=0.0, help="Weight for latent loss")
-        parser.add_argument("--quantize", action="store_true", help="Quantize latent features")
+        # parser.add_argument("--quantize", action="store_true", help="Quantize latent features")
+        parser.add_argument("--quantize", type=int, default=0, help="Quantize latent features by how many bits/levels")
         return parser.parse_args()
 
     args = parse_args()

@@ -138,5 +138,7 @@ def create_videos_from_folder(folder_path, framerate=10):
 
 
 # Example usage:
-# process_folder(folder_path="ae_lstm_output_test", output_folder="ae_PNC16_lstm_frame_and_vid")
-create_videos_from_folder(folder_path="ae_PNC16_lstm_frame_and_vid")
+# folder_path = **input** folder,
+process_folder(folder_path="ae_PNC32_lstm_quantize8_3bits_output_test", output_folder="ae_PNC32_lstm_quantize8_3bits_frame_and_vid")
+# folder_path = **output** folder,
+create_videos_from_folder(folder_path="ae_PNC32_lstm_quantize8_3bits_frame_and_vid")
