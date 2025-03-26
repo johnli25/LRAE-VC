@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import random 
-import zlib
+import math 
 
 class PNC_Autoencoder(nn.Module):
     def __init__(self):
@@ -277,12 +277,20 @@ class ConvLSTMCell(nn.Module):
             padding=padding
         )
 
-    def forward(self, x, h, c): 
+    def forward(self, x, h, c, quality=1.0): 
         """
         x: (batch, input_channels, H, W) - input tensor
         h: (batch, hidden_channels, H, W) - hidden state
         c: (batch, hidden_channels, H, W) - cell state
+        quality: (batch, )
         """
+        # print("quality:", quality)
+        # Ensure quality is a tensor and has shape (batch, 1, 1, 1) for broadcasting
+        if not torch.is_tensor(quality):
+            quality = torch.tensor(quality, device=x.device, dtype=x.dtype)
+        if quality.dim() == 1:
+            quality = quality.view(-1, 1, 1, 1)
+
         combined = torch.cat([x, h], dim=1)  # Concatenate along channel dimension
         gates = self.conv(combined)  # (batch, 4 * hidden_channels, H, W)
 
@@ -294,7 +302,7 @@ class ConvLSTMCell(nn.Module):
         g = torch.tanh(gates[:, 3*chunk:4*chunk]) # Candidate Cell State: Represents the new info that could be added to the cell state.
 
         # Update cell state and hidden state
-        c = f * c + i * g # Acts as the “memory” of the cell, carrying LONG-TERM info 
+        c = f * c + quality * i * g # Acts as the “memory” of the cell, carrying LONG-TERM info 
         h = o * torch.tanh(c) # # Hidden State: acts as output of the LSTM cell. It is used both to produce the cell’s final output and to serve as part of the input to the next time step.
         
         return h, c
@@ -305,10 +313,21 @@ class ConvLSTM(nn.Module):
         super().__init__()
         self.cell = ConvLSTMCell(input_channels, hidden_channels)
         self.hidden_channels = hidden_channels
+        self.quality_factors = []
+        threshold = int(0.9 * input_channels)
+        self.beta = 0.01
+
+        for i in range(input_channels + 1):
+            if 0 <= i <= threshold:
+                self.quality_factors.append(1.0)
+            else:
+                self.quality_factors.append(1.0 - (i - threshold) * 0.1)
+                # self.quality_factors.append(1.0)
     
-    def forward(self, x_seq, drop_levels=None):
+    def forward(self, x_seq, drop_levels=[]):
         """
         x_seq: (batch, seq_len, input_channels, H, W)
+        drop_levels: list of length seq_len, each element is a list of length batch_size
         returns: (batch, seq_len, hidden_channels, H, W)
         """
         bsz, seq_len, _, H, W = x_seq.shape 
@@ -318,22 +337,22 @@ class ConvLSTM(nn.Module):
 
         outputs = []
         for t in range(seq_len):
-            x_t = x_seq[:, t] # extracts the t-th frame
-            
-            if len(drop_levels) > 0:
-                # Get *current* frame drop levels as a tensor of shape: (batch,)
-                drop_level_t = torch.tensor(drop_levels[t], device=x_seq.device, dtype=torch.float32)
-                effective_input = x_t # Initialize effective_input as the original input by default
+            x_t = x_seq[:, t] # extracts the t-th frame, where shape is (batch, input_channels, H, W) e.g. (batch, 32, 32, 32)
+            quality_degrees = [1.0] * bsz
+        
+            if len(drop_levels) > 0 and t > 0:
+                cur_drops, prev_drops = drop_levels[:, t], drop_levels[:, t - 1] # shape: (batch_size,)
+                for i, (cur_drop, prev_drop) in enumerate(zip(cur_drops, prev_drops)):
+                    diff = max(0, cur_drop - prev_drop)
+                    quality_degrees[i] = self.quality_factors[cur_drop] * math.exp(-self.beta * diff) if self.quality_factors[cur_drop] != 1.0 else 1.0
+                
+                # print("\ncurr drop_levels:", cur_drops)
+                # print("prev drop_levels:", prev_drops)
+                # print("quality_degrees:", quality_degrees)
+            quality_degrees = torch.tensor(quality_degrees, device=x_seq.device, dtype=x_seq.dtype)
+            # print("quality_degrees:", quality_degrees)
 
-                if t > 0 and drop_level_t > 24: 
-                    prev_drop_level = torch.tensor(drop_levels[t-1], device=x_seq.device, dtype=torch.float32)
-                    threshold = 4 # Require previous drop < current drop - 5
-                    # Create a mask: True if previous frame is significantly better than the current frame
-                    condition_mask = (prev_drop_level < (drop_level_t - threshold)).view(bsz, 1, 1, 1)
-                    # If condition is True for a sample, set its current input to zero.
-                    effective_input = torch.where(condition_mask, torch.zeros_like(x_t), x_t)
-
-            h, c = self.cell(x_t, h, c)  # update hidden and cell states
+            h, c = self.cell(x_t, h, c, quality_degrees)  # update hidden and cell states
             outputs.append(h.unsqueeze(1)) # NOTE: append the hidden state for this time step. unsqueeze(1) b/c we want to add a new dimension for time!!
 
         return torch.cat(outputs, dim=1)  # (batch, seq_len, hidden_channels, H, W)
@@ -385,35 +404,37 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             current_drop = []
         
             # 2) Randomly drop tail channels/features
-            if drop > 0 or eval_real:
+            if drop > 0:
                 # print("Drop = ", drop)
                 features = features.clone()  # avoid in-place modifications
                 if self.training or eval_real:
                     # Training: randomly drop 0 to `drop` tail channels per sample.
                     random_drops = torch.randint(low=0, high=drop + 1, size=(features.size(0),))
                     for i, random_drop in enumerate(random_drops):
-                        if eval_real:
-                            current_drop.append(random_drop.item())
+                        # if eval_real:
+                        current_drop.append(random_drop.item())
                         if random_drop > 0:
                             features[i, -random_drop:, :, :] = 0.0
                 else:
-                    # Evaluation: drop a constant number of tail channels (e.g., exactly 'drop' channels)
+                    # Evaluation: drop a CONSTANT number of tail channels (e.g., exactly 'drop' amt of channels)
                     features[:, -drop:, :, :] = 0.0
 
             if quantize > 0:
                 features = self.quantize(features, levels=quantize)
 
-            if eval_real: # if eval_real, append drop levels for each sample
+            if self.training or eval_real: # if eval_real, append drop levels for each sample
                 drop_levels.append(current_drop)
             partial_list.append(features) # (batch, 16, 32, 32)
 
         # Convert drop_levels (a list of length seq_len, each an array of length bsz) to shape (bsz, seq_len) by transposing the list:
         drop_levels = list(map(list, zip(*drop_levels)))
+        drop_levels_tensor = torch.tensor(drop_levels, device=x_seq.device)
+        # print("drop_levels:", drop_levels_tensor.shape)
 
         # stack features along the time dimension (seq_len dimension = 1)
         lstm_input = torch.stack(partial_list, dim=1) # (batch, seq_len, 16, 32, 32)
 
-        lstm_out = self.conv_lstm(x_seq=lstm_input, drop_levels=drop_levels) # (batch, seq_len, hidden_channels, 32, 32)
+        lstm_out = self.conv_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32)
     
         # if needed, map hidden state to total_channels, and finally decode!!
         if self.map_lstm2pred is not None:
@@ -434,7 +455,6 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         recon = torch.cat(outputs, dim=1)  # (batch, seq_len, 3, 224, 224)
 
         if eval_real:
-            drop_levels_tensor = torch.tensor(drop_levels, device=x_seq.device)
             return recon, imputed_latents, drop_levels_tensor
         else:
             return recon, imputed_latents, None
