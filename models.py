@@ -306,7 +306,7 @@ class ConvLSTM(nn.Module):
         self.cell = ConvLSTMCell(input_channels, hidden_channels)
         self.hidden_channels = hidden_channels
     
-    def forward(self, x_seq):
+    def forward(self, x_seq, drop_levels=None):
         """
         x_seq: (batch, seq_len, input_channels, H, W)
         returns: (batch, seq_len, hidden_channels, H, W)
@@ -317,10 +317,22 @@ class ConvLSTM(nn.Module):
         c = torch.zeros_like(h)
 
         outputs = []
-
         for t in range(seq_len):
             x_t = x_seq[:, t] # extracts the t-th frame
             
+            if len(drop_levels) > 0:
+                # Get *current* frame drop levels as a tensor of shape: (batch,)
+                drop_level_t = torch.tensor(drop_levels[t], device=x_seq.device, dtype=torch.float32)
+                effective_input = x_t # Initialize effective_input as the original input by default
+
+                if t > 0 and drop_level_t > 24: 
+                    prev_drop_level = torch.tensor(drop_levels[t-1], device=x_seq.device, dtype=torch.float32)
+                    threshold = 4 # Require previous drop < current drop - 5
+                    # Create a mask: True if previous frame is significantly better than the current frame
+                    condition_mask = (prev_drop_level < (drop_level_t - threshold)).view(bsz, 1, 1, 1)
+                    # If condition is True for a sample, set its current input to zero.
+                    effective_input = torch.where(condition_mask, torch.zeros_like(x_t), x_t)
+
             h, c = self.cell(x_t, h, c)  # update hidden and cell states
             outputs.append(h.unsqueeze(1)) # NOTE: append the hidden state for this time step. unsqueeze(1) b/c we want to add a new dimension for time!!
 
@@ -367,9 +379,9 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         drop_levels = []
         # 1) Encode + randomly drop channels
         partial_list = []
-        for t in range(seq_len):
-            frame = x_seq[:, t] # (batch, 3, 224, 224)
-            features = self.encoder(frame) 
+        for t in range(seq_len): # So outer loop needs to loop thru each time step (of frames) in the sequence
+            frame = x_seq[:, t] # needs to be of shape (batch, 3, 224, 224), so that...
+            features = self.encoder(frame) # .encoder(frame) returns (batch, feature_maps, height, width)!
             current_drop = []
         
             # 2) Randomly drop tail channels/features
@@ -378,11 +390,10 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                 features = features.clone()  # avoid in-place modifications
                 if self.training or eval_real:
                     # Training: randomly drop 0 to `drop` tail channels per sample.
-                    for i in range(features.size(0)):
-                        random_drop = torch.randint(low=0, high=drop + 1, size=(1,)).item()
+                    random_drops = torch.randint(low=0, high=drop + 1, size=(features.size(0),))
+                    for i, random_drop in enumerate(random_drops):
                         if eval_real:
-                            current_drop.append(random_drop)
-                        # print("random_drop:", random_drop)
+                            current_drop.append(random_drop.item())
                         if random_drop > 0:
                             features[i, -random_drop:, :, :] = 0.0
                 else:
@@ -402,7 +413,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         # stack features along the time dimension (seq_len dimension = 1)
         lstm_input = torch.stack(partial_list, dim=1) # (batch, seq_len, 16, 32, 32)
 
-        lstm_out = self.conv_lstm(lstm_input) # (batch, seq_len, hidden_channels, 32, 32)
+        lstm_out = self.conv_lstm(x_seq=lstm_input, drop_levels=drop_levels) # (batch, seq_len, hidden_channels, 32, 32)
     
         # if needed, map hidden state to total_channels, and finally decode!!
         if self.map_lstm2pred is not None:

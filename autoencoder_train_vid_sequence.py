@@ -143,7 +143,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
     # os.makedirs("ae_lstm_output_train", exist_ok=True)
     best_val_losses = {}
     if max_drops > 0: 
-        drops = 24  # should be 1 less than the drops you ACTUALLY want to start at
+        drops = 21  # should be 1 less than the drops you ACTUALLY want to start at
     
     for epoch in range(num_epochs):
         # steadily increase the max # of drops every 2 epochs
@@ -159,7 +159,8 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
             frames_tensor = frames.to(device)
             optimizer.zero_grad()
 
-            drop_val = random.randint(0, drops) if max_drops > 0 else 0 # TODO: INVESTIGATE this line? Is this necessary at all? OR should I directly pass in 'drops'?
+            # drop_val = random.randint(0, drops) if max_drops > 0 else 0 # TODO: INVESTIGATE this line? Is this necessary at all? OR should I directly pass in 'drops'?
+            drop_val = drops if max_drops > 0 else 0
             recon, _, _ = ae_model(x_seq=frames_tensor, drop=drop_val, quantize=quantize)  # -> (batch_size, seq_len, 3, 224, 224)
 
             total_loss = criterion(recon, frames_tensor)
@@ -218,20 +219,20 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
 
             
             ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
-            frame_latent = model.module.encoder(frames_tensor[0][0]) # encode the first frame of the first video sequence in batch
-            if quantize > 0:
-                features_cpu = frame_latent.detach().cpu().numpy()
-                features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
-                compressed = zlib.compress(features_uint8.tobytes())
-                latent_num_bytes = len(compressed)
-                print(f"[Simulated Compression] Frame 0 compressed size (quantized to uint8): {latent_num_bytes} bytes "
-                    f"(Original shape: {tuple(frame_latent.shape)})")
-            else:
-                features_cpu = frame_latent.detach().cpu().numpy().astype(np.float32)
-                compressed = zlib.compress(features_cpu.tobytes())
-                latent_num_bytes = len(compressed)
-                print(f"[Simulated Compression] Frame 0 compressed size (float32): {latent_num_bytes} bytes "
-                    f"(Original shape: {tuple(frame_latent.shape)})")
+            # frame_latent = model.module.encoder(frames_tensor[0][0]) # encode the first frame of the first video sequence in batch
+            # if quantize > 0:
+            #     features_cpu = frame_latent.detach().cpu().numpy()
+            #     features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
+            #     compressed = zlib.compress(features_uint8.tobytes())
+            #     latent_num_bytes = len(compressed)
+            #     print(f"[Simulated Compression] Frame 0 compressed size (quantized to uint8): {latent_num_bytes} bytes "
+            #         f"(Original shape: {tuple(frame_latent.shape)})")
+            # else:
+            #     features_cpu = frame_latent.detach().cpu().numpy().astype(np.float32)
+            #     compressed = zlib.compress(features_cpu.tobytes())
+            #     latent_num_bytes = len(compressed)
+            #     print(f"[Simulated Compression] Frame 0 compressed size (float32): {latent_num_bytes} bytes "
+            #         f"(Original shape: {tuple(frame_latent.shape)})")
             ##### end intermission function
 
             
@@ -415,13 +416,13 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, quantize=args.quantize)
-    # if drops > 0:
-    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
-    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
-    # else: # no dropout OR original model
-    #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
-    #     print(f"Model saved as {args.model}_final_weights.pth")
+    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, quantize=args.quantize)
+    if drops > 0:
+        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
+        print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    else: # no dropout OR original model
+        torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+        print(f"Model saved as {args.model}_final_weights.pth")
 
 
     # NOTE: for Experimental Evaluation
