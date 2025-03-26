@@ -414,13 +414,13 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, quantize=args.quantize)
-    if drops > 0:
-        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
-        print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
-    else: # no dropout OR original modelx
-        torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
-        print(f"Model saved as {args.model}_final_weights.pth")
+    # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, quantize=args.quantize)
+    # if drops > 0:
+    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    # else: # no dropout OR original modelx
+    #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+    #     print(f"Model saved as {args.model}_final_weights.pth")
 
 
     # NOTE: for Experimental Evaluation
