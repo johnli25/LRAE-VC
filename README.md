@@ -103,3 +103,7 @@ This turned out to be crucial for success
 ##### Does ConvLSTM process each frame independently? 
 
 No not exactly. The ConvLSTM processes frames sequentially—each frame’s hidden state is updated using the previous hidden state, so it carries past context. However, once the sequence is processed, we often reshape the output (merging the batch and time dimensions) to apply a convolutional mapping to each time step individually. That mapping operates on each frame separately, but each frame’s representation already includes the temporal history learned by the LSTM.
+
+##### why does ConvLSTM "flatten" dimension 0 into batch_size * time? 
+
+The LSTM treats each batch element (i.e., each video or sequence) independently. The batch dimension is simply a collection of separate sequences processed in parallel. When you merge the batch and time dimensions later, you're not mixing frames from different videos; you're just flattening the tensor to apply the same convolutional operation to every time step's output across all batches. Each frame's representation already contains its own temporal context from its respective sequence.
