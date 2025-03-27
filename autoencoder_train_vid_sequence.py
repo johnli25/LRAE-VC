@@ -403,12 +403,37 @@ if __name__ == "__main__":
                 new_key = "module." + key
             new_checkpoint[new_key] = value
         return new_checkpoint
+    
+    # NOTE: use this function to update checkpoint with any new keys
+    def updateCheckpointWithNewKeys(model, checkpoint):
+        model_dict = model.state_dict()
+        missing_keys = set(model_dict.keys()) - set(checkpoint.keys())
+        if missing_keys:
+            print(f"Missing keys in checkpoint: {missing_keys}")
+        for key in missing_keys:
+            print("Add missing key with default initialization:", key)
+            checkpoint[key] = model_dict[key]
+        return checkpoint
+    
+    # NOTE: Load a pretrained model and update with new parameters if necessary.
+    def loadPretrainedModel(model, model_path, device, use_dataparallel=True):
+        # Load checkpoint from file.
+        checkpoint = torch.load(model_path, map_location=device)
+        # Convert the checkpoint to DataParallel format if desired.
+        if use_dataparallel:
+            checkpoint = convertFromNormalToDataParallel(checkpoint)
+        else:
+            checkpoint = convertFromDataParallelNormal(checkpoint)
+        # Update checkpoint with any missing keys (e.g., new parameters like drift)
+        checkpoint = updateCheckpointWithNewKeys(model, checkpoint)
+        # Load the state dict into the model.
+        model.load_state_dict(checkpoint)
+        print(f"Loaded model weights from {model_path}")
+        return model
+    
 
     if args.model_path:
-        checkpoint = torch.load(args.model_path, map_location=device)
-        checkpoint = convertFromNormalToDataParallel(checkpoint)
-        model.load_state_dict(checkpoint)
-        print(f"Loaded model weights from {args.model_path}")
+        model = loadPretrainedModel(model, args.model_path, device, use_dataparallel=True)
 
     # Define loss/optimizer
     criterion = nn.MSELoss()

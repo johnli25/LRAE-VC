@@ -277,6 +277,10 @@ class ConvLSTMCell(nn.Module):
             padding=padding
         )
 
+        # A learnable drift term (initialized small) that will be used only when quality is low
+        # Shape is (hidden_channels, 1, 1) so that it can be expanded to match spatial dimensions
+        self.drift = nn.Parameter(torch.randn(hidden_channels, 1, 1) * 0.01)
+
     def forward(self, x, h, c, quality=1.0): 
         """
         x: (batch, input_channels, H, W) - input tensor
@@ -302,7 +306,10 @@ class ConvLSTMCell(nn.Module):
         g = torch.tanh(gates[:, 3*chunk:4*chunk]) # Candidate Cell State: Represents the new info that could be added to the cell state.
 
         # Update cell state and hidden state
-        c = f * c + quality * i * g # Acts as the “memory” of the cell, carrying LONG-TERM info 
+        # NOTE: When quality is 0, (1 - quality) becomes 1, so drift is fully applied.
+        # NOTE: When quality is 1, drift is effectively canceled.
+        # print(f"self.drift = {self.drift.shape} and 1-quality = {(1-quality).shape}")
+        c = f * c + quality * i * g # + (1 - quality) * self.drift.expand_as(c) # Acts as the “memory” of the cell, carrying LONG-TERM info 
         h = o * torch.tanh(c) # # Hidden State: acts as output of the LSTM cell. It is used both to produce the cell’s final output and to serve as part of the input to the next time step.
         
         return h, c
@@ -321,8 +328,8 @@ class ConvLSTM(nn.Module):
             if 0 <= i <= threshold:
                 self.quality_factors.append(1.0)
             else:
-                self.quality_factors.append(1.0 - (i - threshold) * 0.1)
-                # self.quality_factors.append(1.0)
+                # self.quality_factors.append(1.0 - (i - threshold) * 0.1)
+                self.quality_factors.append(1.0)
     
     def forward(self, x_seq, drop_levels=[]):
         """
@@ -350,7 +357,6 @@ class ConvLSTM(nn.Module):
                 # print("prev drop_levels:", prev_drops)
                 # print("quality_degrees:", quality_degrees)
             quality_degrees = torch.tensor(quality_degrees, device=x_seq.device, dtype=x_seq.dtype)
-            # print("quality_degrees:", quality_degrees)
 
             h, c = self.cell(x_t, h, c, quality_degrees)  # update hidden and cell states
             outputs.append(h.unsqueeze(1)) # NOTE: append the hidden state for this time step. unsqueeze(1) b/c we want to add a new dimension for time!!
