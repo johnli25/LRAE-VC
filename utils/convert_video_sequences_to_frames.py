@@ -146,7 +146,7 @@ def create_videos_grouped_by_prefix_and_start(input_folder, output_folder, frame
 
 # Example usage:
 # First, process the images to select the best (lowest MSE) version:
-# process_images_select_best_mse(input_folder="ae_lstm_output_test_realistic", output_folder="PNC32_AE_lstm_qual_improv1_output_test_realistic_frame_and_vids")
+process_images_select_best_mse(input_folder="ae_lstm_output_test", output_folder="PNC32_ae_lstm_output_19drops")
 
 # Then, create videos from the processed images grouping by (prefix, start_idx):
-create_videos_grouped_by_prefix_and_start(input_folder="ae_lstm_output_test_realistic", output_folder="PNC32_AE_lstm_output_test_realistic_frame_and_vids", framerate=10)
+create_videos_grouped_by_prefix_and_start(input_folder="PNC32_ae_lstm_output_19drops", output_folder="PNC32_ae_lstm_output_19drops", framerate=10)

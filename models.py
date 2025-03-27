@@ -320,6 +320,7 @@ class ConvLSTM(nn.Module):
         super().__init__()
         self.cell = ConvLSTMCell(input_channels, hidden_channels)
         self.hidden_channels = hidden_channels
+
         self.quality_factors = []
         threshold = int(0.9 * input_channels)
         self.beta = 0.01
@@ -362,6 +363,60 @@ class ConvLSTM(nn.Module):
             outputs.append(h.unsqueeze(1)) # NOTE: append the hidden state for this time step. unsqueeze(1) b/c we want to add a new dimension for time!!
 
         return torch.cat(outputs, dim=1)  # (batch, seq_len, hidden_channels, H, W)
+    
+class ConvBiLSTM(nn.Module):
+    """
+    Truly bidirectional ConvLSTM that processes the whole sequence forward and backward.
+    we combine the forward and backward hidden states via concatenation at each time step.
+    """
+    def __init__(self, input_channels, hidden_channels, kernel_size=3):
+        super().__init__()
+        self.hidden_channels = hidden_channels 
+
+        # forward and backward cells
+        self.forward_cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
+        self.backward_cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
+
+    def forward(self, x):
+        """
+        x: (batch, seq_len, input_channels, H, W)
+        returns h_out of shape (batch, seq_len, 2 * hidden_channels, H, W) since forward + backward states are concatenated
+        """
+        batch_size, seq_len, input_channels, H, W = x.shape 
+
+        # buffers for forward pass
+        h_forward, c_forward = [], []
+
+        # initialize
+        h_f = torch.zeros(batch_size, self.hidden_channels, H, W).to(x.device)
+        c_f = torch.zeros_like(h_f)
+
+        for t in range(seq_len):
+            x_t = x[:, t]
+            h_f, c_f = self.forward_cell(x_t, h_f, c_f)
+            h_forward.append(h_f.unsqueeze(1))
+
+        # buffers for backward pass
+        h_backward, c_backward = [], []
+
+        # initialize
+        h_b = torch.zeros(batch_size, self.hidden_channels, H, W).to(x.device)
+        c_b = torch.zeros_like(h_b)
+
+        for t in reversed(range(seq_len)):
+            x_t = x[:, t]
+            h_b, c_b = self.backward_cell(x_t, h_b, c_b)
+            h_backward.append(h_b.unsqueeze(1))
+
+        # concatenate forward and backward hidden states
+        outputs = []
+        for t in range(seq_len):
+            h_t = h_forward[t]  # (batch, hidden_channels, H, W)
+            h_t_b = h_backward[t]  # (batch, hidden_channels, H, W)
+            h_t_out = torch.cat([h_t, h_t_b], dim=1)  # (batch, 2 * hidden_channels, H, W)
+            outputs.append(h_t_out)
+
+        return torch.cat(outputs, dim=1)  # (batch, seq_len, 2 * hidden_channels, H, W)
     
 
 class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding for feature/channel dropouts
