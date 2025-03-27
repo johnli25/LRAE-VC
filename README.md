@@ -100,3 +100,6 @@ After realizing this I decided to implement my pipeline + forward pass as encode
 
 This turned out to be crucial for success
 
+##### Does ConvLSTM process each frame independently? 
+
+No not exactly. The ConvLSTM processes frames sequentially—each frame’s hidden state is updated using the previous hidden state, so it carries past context. However, once the sequence is processed, we often reshape the output (merging the batch and time dimensions) to apply a convolutional mapping to each time step individually. That mapping operates on each frame separately, but each frame’s representation already includes the temporal history learned by the LSTM.
