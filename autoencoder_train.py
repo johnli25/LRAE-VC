@@ -56,7 +56,7 @@ class ImageDataset(Dataset):
         return image, self.img_names[idx]  # (image, same_image_as_ground_truth, img filename)
 
 
-def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length, quantize=False):
+def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length, quantize=0):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
 
@@ -80,7 +80,7 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
             inputs = inputs.to(device)
 
             optimizer.zero_grad()
-            outputs = model(x=inputs, tail_length=tail_len, quantize_latent=quantize)
+            outputs = model(x=inputs, tail_length=tail_len, quantize_level=quantize)
             loss = criterion(outputs, inputs)
             loss.backward()
             optimizer.step()
@@ -91,7 +91,7 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
         train_losses.append(train_loss)
 
         # Validate the model
-        val_loss = eval_autoencoder(model, val_loader, criterion, device, max_tail_length)
+        val_loss = eval_autoencoder(model, val_loader, criterion, device, max_tail_length, quantize)
         val_losses.append(val_loss)
 
         # Save the best model
@@ -115,11 +115,11 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
     else: torch.save(model.state_dict(), f"{model_name}_final_no_dropouts.pth")
 
     # Final Test: test_autoencoder()
-    test_loss = eval_autoencoder(model, test_loader, criterion, device, max_tail_length)
+    test_loss = eval_autoencoder(model, test_loader, criterion, device, max_tail_length, quantize)
     print(f"Final Test Loss: {test_loss:.4f}")
 
 
-def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None, quantize=False):
+def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None, quantize=0):
     model.eval()
     test_loss = 0
     with torch.no_grad():
@@ -128,20 +128,24 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None,
             # tail_len = torch.randint(0, max_tail_length, (1,)).item() if max_tail_length else None
             # print("Eval tail length: ", tail_len)
             inputs = inputs.to(device)
-            outputs = model(x=inputs, tail_length=16, quantize_latent=quantize)
+            outputs = model(x=inputs, tail_length=max_tail_length, quantize_level=quantize)
 
 
             ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
-            frame_latent = model.encode(inputs[0]) # .module b/c of DataParallel model
-
-            features_cpu = frame_latent.detach().cpu().numpy()
-            features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
-
-            compressed = zlib.compress(features_uint8.tobytes())    
-            latent_num_bytes = len(compressed)
-
-            print(f"[Simulated Compression] Frame 0 compressed size: {latent_num_bytes} bytes "
-                f"(Original shape: {tuple(frame_latent.shape)})")
+            frame_latent = model.module.encode(inputs[0])
+            if quantize > 0:
+                features_cpu = frame_latent.detach().cpu().numpy()
+                features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
+                compressed = zlib.compress(features_uint8.tobytes())
+                latent_num_bytes = len(compressed)
+                print(f"[Simulated Compression] Frame 0 compressed size (quantized to uint8): {latent_num_bytes} bytes "
+                    f"(Original shape: {tuple(frame_latent.shape)})")
+            else:
+                features_cpu = frame_latent.detach().cpu().numpy().astype(np.float32)
+                compressed = zlib.compress(features_cpu.tobytes())
+                latent_num_bytes = len(compressed)
+                print(f"[Simulated Compression] Frame 0 compressed size (float32): {latent_num_bytes} bytes "
+                    f"(Original shape: {tuple(frame_latent.shape)})")
             ##############
 
             loss = criterion(outputs, inputs)
@@ -174,7 +178,7 @@ if __name__ == "__main__":
                             help="Model to train")
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
-        parser.add_argument("--quantize", action="store_true", help="Choose to use quantization")
+        parser.add_argument("--quantize", type=int, default=0, help="Quantize latent features by how many bits/levels")
         return parser.parse_args()
     
     args = parse_args()

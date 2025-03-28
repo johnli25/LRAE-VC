@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 import random 
-import zlib
+import math 
 
 class PNC_Autoencoder(nn.Module):
     def __init__(self):
@@ -151,7 +151,7 @@ class PNC32(nn.Module):
         y5 = torch.clamp(y5, min=0, max=1)  # Normalize output to [0, 1]
         return y5
 
-    def forward(self, x, tail_length=None, quantize_latent=False):
+    def forward(self, x, tail_length=None, quantize_level=False):
         # Encoder
         x2 = self.encode(x)  # (3, 224, 224) -> (32, 32, 32)
         if tail_length is not None:
@@ -162,8 +162,9 @@ class PNC32(nn.Module):
             x2[:, tail_start:, :, :] = 0
 
         # Quantization: simulate 8-bit quantization on the latent
-        if quantize_latent:
-            x2 = self.quantize(x2, levels=256) # NOTE: levels=256 still maintains range [0,1] for x2; it just quantizes the values to 256 levels.
+        if quantize_level > 0:
+            print("quantize_level in PNC32:", quantize_level)
+            x2 = self.quantize(x2, levels=8) # NOTE: levels=256 still maintains range [0,1] for x2; it just quantizes the values to 256 levels.
 
         # Decoder
         y5 = self.decode(x2)  # (32, 32, 32) -> (3, 224, 224)
@@ -178,21 +179,6 @@ class PNC32(nn.Module):
         x_clamped = torch.clamp(x, 0, 1)
         x_quantized = torch.round(x_clamped * (levels - 1)) / (levels - 1)
         return x_quantized
-
-    def simulate_entropy_coding(self, x, levels=256):
-        """
-        Simulate entropy coding by quantizing the latent, converting it to a uint8 numpy array,
-        and then compressing it with zlib. Returns the size (in bytes) of the compressed latent.
-        Note: This is non-differentiable and intended only for evaluation/simulation.
-        """
-        x_q = self.quantize(x, levels)
-        # Convert tensor to numpy array. Expect x_q to be in [0,1].
-        x_np = x_q.detach().cpu().numpy()
-        # Scale to [0, 255] and convert to uint8.
-        x_uint8 = (x_np * 255).astype(np.uint8)
-        # Compress using zlib.
-        compressed = zlib.compress(x_uint8.tobytes())
-        return len(compressed)
     
 
 
@@ -292,25 +278,41 @@ class ConvLSTMCell(nn.Module):
             padding=padding
         )
 
-    def forward(self, x, h, c): 
+        # A learnable drift term (initialized small) that will be used only when quality is low
+        # Shape is (hidden_channels, 1, 1) so that it can be expanded to match spatial dimensions
+        self.drift = nn.Parameter(torch.randn(hidden_channels, 1, 1) * 0.01)
+
+    def forward(self, x, h, c, quality=1.0): 
         """
         x: (batch, input_channels, H, W) - input tensor
         h: (batch, hidden_channels, H, W) - hidden state
         c: (batch, hidden_channels, H, W) - cell state
+        quality: (batch, )
         """
+        # print("quality:", quality)
+        # Ensure quality is a tensor and has shape (batch, 1, 1, 1) for broadcasting
+        if not torch.is_tensor(quality):
+            quality = torch.tensor(quality, device=x.device, dtype=x.dtype)
+        if quality.dim() == 1:
+            quality = quality.view(-1, 1, 1, 1)
+
         combined = torch.cat([x, h], dim=1)  # Concatenate along channel dimension
         gates = self.conv(combined)  # (batch, 4 * hidden_channels, H, W)
 
         # Split the gates into input, forget, cell, and output gates
         chunk = self.hidden_channels
-        i = torch.sigmoid(gates[:, 0:chunk])
-        f = torch.sigmoid(gates[:, chunk:2*chunk])
-        o = torch.sigmoid(gates[:, 2*chunk:3*chunk])
-        g = torch.tanh(gates[:, 3*chunk:4*chunk])
+        i = torch.sigmoid(gates[:, 0:chunk]) # input gate determines how much of the new input to --> cell state
+        f = torch.sigmoid(gates[:, chunk:2*chunk]) # Decides what information to discard from the previous cell state.
+        o = torch.sigmoid(gates[:, 2*chunk:3*chunk]) # Controls how much of the cell state should be exposed as the hidden state (output) for current time step.
+        g = torch.tanh(gates[:, 3*chunk:4*chunk]) # Candidate Cell State: Represents the new info that could be added to the cell state.
 
         # Update cell state and hidden state
-        c = f * c + i * g 
-        h = o * torch.tanh(c) 
+        # NOTE: When quality is 0, (1 - quality) becomes 1, so drift is fully applied.
+        # NOTE: When quality is 1, drift is effectively canceled.
+        # print(f"self.drift = {self.drift.shape} and 1-quality = {(1-quality).shape}")
+        c = f * c + quality * i * g # + (1 - quality) * self.drift.expand_as(c) # Acts as the “memory” of the cell, carrying LONG-TERM info 
+        h = o * torch.tanh(c) # # Hidden State: acts as output of the LSTM cell. It is used both to produce the cell’s final output and to serve as part of the input to the next time step.
+        
         return h, c
     
 
@@ -319,10 +321,22 @@ class ConvLSTM(nn.Module):
         super().__init__()
         self.cell = ConvLSTMCell(input_channels, hidden_channels)
         self.hidden_channels = hidden_channels
+
+        self.quality_factors = []
+        threshold = int(0.9 * input_channels)
+        self.beta = 0.01
+
+        for i in range(input_channels + 1):
+            if 0 <= i <= threshold:
+                self.quality_factors.append(1.0)
+            else:
+                # self.quality_factors.append(1.0 - (i - threshold) * 0.1)
+                self.quality_factors.append(1.0)
     
-    def forward(self, x_seq):
+    def forward(self, x_seq, drop_levels=[]):
         """
         x_seq: (batch, seq_len, input_channels, H, W)
+        drop_levels: list of length seq_len, each element is a list of length batch_size
         returns: (batch, seq_len, hidden_channels, H, W)
         """
         bsz, seq_len, _, H, W = x_seq.shape 
@@ -331,20 +345,87 @@ class ConvLSTM(nn.Module):
         c = torch.zeros_like(h)
 
         outputs = []
-
         for t in range(seq_len):
-            x_t = x_seq[:, t] # extracts the t-th frame
-            h, c = self.cell(x_t, h, c)  # update hidden and cell states
+            x_t = x_seq[:, t] # extracts the t-th frame, where shape is (batch, input_channels, H, W) e.g. (batch, 32, 32, 32)
+            quality_degrees = [1.0] * bsz
+        
+            if len(drop_levels) > 0 and t > 0:
+                cur_drops, prev_drops = drop_levels[:, t], drop_levels[:, t - 1] # shape: (batch_size,)
+                for i, (cur_drop, prev_drop) in enumerate(zip(cur_drops, prev_drops)):
+                    diff = max(0, cur_drop - prev_drop)
+                    quality_degrees[i] = self.quality_factors[cur_drop] * math.exp(-self.beta * diff) if self.quality_factors[cur_drop] != 1.0 else 1.0
+                
+                # print("\ncurr drop_levels:", cur_drops)
+                # print("prev drop_levels:", prev_drops)
+                # print("quality_degrees:", quality_degrees)
+            quality_degrees = torch.tensor(quality_degrees, device=x_seq.device, dtype=x_seq.dtype)
+
+            h, c = self.cell(x_t, h, c, quality_degrees)  # update hidden and cell states
             outputs.append(h.unsqueeze(1)) # NOTE: append the hidden state for this time step. unsqueeze(1) b/c we want to add a new dimension for time!!
 
         return torch.cat(outputs, dim=1)  # (batch, seq_len, hidden_channels, H, W)
     
+class ConvBiLSTM(nn.Module):
+    """
+    Truly bidirectional ConvLSTM that processes the whole sequence forward and backward.
+    we combine the forward and backward hidden states via concatenation at each time step.
+    """
+    def __init__(self, input_channels, hidden_channels, kernel_size=3):
+        super().__init__()
+        self.hidden_channels = hidden_channels 
+
+        # forward and backward cells
+        self.forward_cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
+        self.backward_cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
+
+    def forward(self, x_seq, drop_levels=[]):
+        """
+        x: (batch, seq_len, input_channels, H, W)
+        returns h_out of shape (batch, seq_len, 2 * hidden_channels, H, W) since forward + backward states are concatenated
+        """
+        batch_size, seq_len, input_channels, H, W = x_seq.shape 
+
+        # buffers for forward pass
+        h_forward, c_forward = [], []
+
+        # initialize
+        h_f = torch.zeros(batch_size, self.hidden_channels, H, W).to(x_seq.device)
+        c_f = torch.zeros_like(h_f)
+
+        for t in range(seq_len):
+            x_t = x_seq[:, t]
+            h_f, c_f = self.forward_cell(x_t, h_f, c_f)
+            h_forward.append(h_f.unsqueeze(1))
+
+        # buffers for backward pass
+        h_backward, c_backward = [], []
+
+        # initialize
+        h_b = torch.zeros(batch_size, self.hidden_channels, H, W).to(x_seq.device)
+        c_b = torch.zeros_like(h_b)
+
+        for t in reversed(range(seq_len)):
+            x_t = x_seq[:, t]
+            h_b, c_b = self.backward_cell(x_t, h_b, c_b)
+            h_backward.append(h_b.unsqueeze(1))
+
+        # concatenate forward and backward hidden states
+        outputs = []
+        for t in range(seq_len):
+            h_t = h_forward[t]  # (batch, hidden_channels, H, W)
+            h_t_b = h_backward[t]  # (batch, hidden_channels, H, W)
+            h_t_out = torch.cat([h_t, h_t_b], dim=1)  # (batch, 2 * hidden_channels, H, W)
+            outputs.append(h_t_out)
+
+        return torch.cat(outputs, dim=1)  # (batch, seq_len, 2 * hidden_channels, H, W)
+    
 
 class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding for feature/channel dropouts
-    def __init__(self, total_channels, hidden_channels, ae_model_name):
+    def __init__(self, total_channels, hidden_channels, ae_model_name, bidirectional=False):
         super().__init__()
         self.total_channels = total_channels
         self.hidden_channels = hidden_channels
+        self.bidirectional = bidirectional
 
         # 1) encoder
         if ae_model_name == "PNC16":
@@ -355,13 +436,19 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             self.encoder = PNC32Encoder()
 
         #2 Feed forward zero-padded partial latents to LSTM. LSTM sees input_channels=total_channels 
-        self.conv_lstm = ConvLSTM(input_channels=total_channels, hidden_channels=hidden_channels)
+        lstm_out_channels = 2 * hidden_channels if bidirectional else hidden_channels
 
-        # 3) If LSTM's hidden state dimensions/channels != total_channels, map LSTM's hidden state channels to total_channels (which is input to decoder) e.g. if hidden_channels=32, total_channels=16 for PNC16
-        if hidden_channels != total_channels:
-            self.map_lstm2pred = nn.Conv2d(hidden_channels, total_channels, kernel_size=1, stride=1, padding=0)
+        if bidirectional:
+            self.conv_lstm = ConvBiLSTM(input_channels=total_channels, hidden_channels=hidden_channels)
         else:
-            self.map_lstm2pred = None
+            self.conv_lstm = ConvLSTM(input_channels=total_channels, hidden_channels=hidden_channels)
+
+        print("lstm_out_channels:", lstm_out_channels)
+        # 3) If LSTM's hidden state dimensions/channels != total_channels, map LSTM's hidden state channels to total_channels (which is input to decoder) e.g. if hidden_channels=32, total_channels=16 for PNC16
+        if lstm_out_channels != total_channels:
+            self.project_lstm_to_latent = nn.Conv2d(lstm_out_channels, total_channels, kernel_size=1, stride=1, padding=0)
+        else: 
+            self.project_lstm_to_latent = None
         
         # 5) finally, decoder
         if ae_model_name == "PNC16":
@@ -371,53 +458,59 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             print("Using PNC32 Decoder")
             self.decoder = PNC32Decoder()
 
-    def forward(self, x_seq, drop=0, eval_real=False):
+    def forward(self, x_seq, drop=0, eval_real=False, quantize=False):
         """
         x_seq: (batch_size, seq_len, 3, 224, 224)   
         returns (batch_size, seq_len, 3, 224, 224) reconstructed video frames/imgs sequence
         """
+        # print(self.conv_lstm, self.project_lstm_to_latent, self.decoder)
         bsz, seq_len, c, h, w = x_seq.shape
         drop_levels = []
         # 1) Encode + randomly drop channels
         partial_list = []
-        for t in range(seq_len):
-            frame = x_seq[:, t] # (batch, 3, 224, 224)
-            features = self.encoder(frame) 
+        for t in range(seq_len): # So outer loop needs to loop thru each time step (of frames) in the sequence
+            frame = x_seq[:, t] # needs to be of shape (batch, 3, 224, 224), so that...
+            features = self.encoder(frame) # .encoder(frame) returns (batch, feature_maps, height, width)!
             current_drop = []
         
             # 2) Randomly drop tail channels/features
-            if drop > 0 or eval_real:
-                # print("Drop = ", drop)
+            if drop > 0:
                 features = features.clone()  # avoid in-place modifications
                 if self.training or eval_real:
                     # Training: randomly drop 0 to `drop` tail channels per sample.
-                    for i in range(features.size(0)):
-                        random_drop = torch.randint(low=0, high=drop + 1, size=(1,)).item()
-                        if eval_real:
-                            current_drop.append(random_drop)
-                        # print("random_drop:", random_drop)
+                    random_drops = torch.randint(low=0, high=drop + 1, size=(features.size(0),))
+                    for i, random_drop in enumerate(random_drops):
+                        # if eval_real:
+                        current_drop.append(random_drop.item())
                         if random_drop > 0:
                             features[i, -random_drop:, :, :] = 0.0
                 else:
-                    # Evaluation: drop a constant number of tail channels (e.g., exactly 'drop' channels)
+                    # Evaluation: drop a CONSTANT number of tail channels (e.g., exactly 'drop' amt of channels)
                     features[:, -drop:, :, :] = 0.0
 
-            if eval_real: # if eval_real, append drop levels for each sample
+            if quantize > 0:
+                features = self.quantize(features, levels=quantize)
+
+            if self.training or eval_real: # if eval_real, append drop levels for each sample
                 drop_levels.append(current_drop)
             partial_list.append(features) # (batch, 16, 32, 32)
 
         # Convert drop_levels (a list of length seq_len, each an array of length bsz) to shape (bsz, seq_len) by transposing the list:
         drop_levels = list(map(list, zip(*drop_levels)))
+        drop_levels_tensor = torch.tensor(drop_levels, device=x_seq.device)
+        # print("drop_levels:", drop_levels_tensor.shape)
 
         # stack features along the time dimension (seq_len dimension = 1)
         lstm_input = torch.stack(partial_list, dim=1) # (batch, seq_len, 16, 32, 32)
 
-        lstm_out = self.conv_lstm(lstm_input) # (batch, seq_len, hidden_channels, 32, 32)
-    
+        # lstm_out = self.conv_bi_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32)
+        lstm_out = self.conv_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32) 
+
         # if needed, map hidden state to total_channels, and finally decode!!
-        if self.map_lstm2pred is not None:
+        if self.project_lstm_to_latent is not None:
             # Flatten batch and time dimensions for mapping
-            imputed_latents = self.map_lstm2pred(lstm_out.view(-1, self.hidden_channels, 32, 32))
+            lstm_channels = 2 * self.hidden_channels if self.bidirectional else self.hidden_channels
+            imputed_latents = self.project_lstm_to_latent(lstm_out.view(-1, lstm_channels, 32, 32))
             # Reshape back to (batch, seq_len, total_channels, 32, 32)
             imputed_latents = imputed_latents.view(bsz, seq_len, self.total_channels, 32, 32) # Example: 32 hidden channels -> 16 total channels (PNC16 AE)
         else:
@@ -433,10 +526,19 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         recon = torch.cat(outputs, dim=1)  # (batch, seq_len, 3, 224, 224)
 
         if eval_real:
-            drop_levels_tensor = torch.tensor(drop_levels, device=x_seq.device)
             return recon, imputed_latents, drop_levels_tensor
         else:
             return recon, imputed_latents, None
+        
+    def quantize(self, x, levels=256):  
+        """
+        Simulate quantization by clamping x to [0,1] and then rounding to levels-1 steps.
+        For optimal reconstruction quality, you should consider using quantization-aware training.
+        """
+        # For simplicity, assume x is roughly in [0, 1]. Otherwise, consider a learned scale.
+        x_clamped = torch.clamp(x, 0, 1)
+        x_quantized = torch.round(x_clamped * (levels - 1)) / (levels - 1)
+        return x_quantized
 
 
     
