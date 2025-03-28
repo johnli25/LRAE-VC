@@ -144,7 +144,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
     # os.makedirs("ae_lstm_output_train", exist_ok=True)
     best_val_losses = {}
     if max_drops > 0: 
-        drops = 30  # should be 1 less than the drops you ACTUALLY want to start at
+        drops = -1  # should be 1 less than the drops you ACTUALLY want to start at
     
     for epoch in range(num_epochs):
         # steadily increase the max # of drops every 2 epochs
@@ -376,7 +376,7 @@ if __name__ == "__main__":
     elif args.model == "conv_lstm_PNC16_ae": # currently based on PNC16, which is a 16-feature/channel (for encode) model
         model = ConvLSTM_AE(total_channels=16, hidden_channels=32, ae_model_name="PNC16")
     elif args.model == "conv_lstm_PNC32_ae":
-        model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32")
+        model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=True)
 
     model = model.to(device)
     if torch.cuda.device_count() > 1:
@@ -449,7 +449,7 @@ if __name__ == "__main__":
 
 
     # NOTE: for Experimental Evaluation
-    final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
-    # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
+    # final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
+    final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
     print(f"Final Test Loss For evaluation: {final_test_loss:.4f}")
     

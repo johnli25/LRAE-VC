@@ -163,6 +163,7 @@ class PNC32(nn.Module):
 
         # Quantization: simulate 8-bit quantization on the latent
         if quantize_level > 0:
+            print("quantize_level in PNC32:", quantize_level)
             x2 = self.quantize(x2, levels=8) # NOTE: levels=256 still maintains range [0,1] for x2; it just quantizes the values to 256 levels.
 
         # Decoder
@@ -377,22 +378,22 @@ class ConvBiLSTM(nn.Module):
         self.forward_cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
         self.backward_cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
 
-    def forward(self, x):
+    def forward(self, x_seq, drop_levels=[]):
         """
         x: (batch, seq_len, input_channels, H, W)
         returns h_out of shape (batch, seq_len, 2 * hidden_channels, H, W) since forward + backward states are concatenated
         """
-        batch_size, seq_len, input_channels, H, W = x.shape 
+        batch_size, seq_len, input_channels, H, W = x_seq.shape 
 
         # buffers for forward pass
         h_forward, c_forward = [], []
 
         # initialize
-        h_f = torch.zeros(batch_size, self.hidden_channels, H, W).to(x.device)
+        h_f = torch.zeros(batch_size, self.hidden_channels, H, W).to(x_seq.device)
         c_f = torch.zeros_like(h_f)
 
         for t in range(seq_len):
-            x_t = x[:, t]
+            x_t = x_seq[:, t]
             h_f, c_f = self.forward_cell(x_t, h_f, c_f)
             h_forward.append(h_f.unsqueeze(1))
 
@@ -400,11 +401,11 @@ class ConvBiLSTM(nn.Module):
         h_backward, c_backward = [], []
 
         # initialize
-        h_b = torch.zeros(batch_size, self.hidden_channels, H, W).to(x.device)
+        h_b = torch.zeros(batch_size, self.hidden_channels, H, W).to(x_seq.device)
         c_b = torch.zeros_like(h_b)
 
         for t in reversed(range(seq_len)):
-            x_t = x[:, t]
+            x_t = x_seq[:, t]
             h_b, c_b = self.backward_cell(x_t, h_b, c_b)
             h_backward.append(h_b.unsqueeze(1))
 
@@ -420,10 +421,11 @@ class ConvBiLSTM(nn.Module):
     
 
 class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding for feature/channel dropouts
-    def __init__(self, total_channels, hidden_channels, ae_model_name):
+    def __init__(self, total_channels, hidden_channels, ae_model_name, bidirectional=False):
         super().__init__()
         self.total_channels = total_channels
         self.hidden_channels = hidden_channels
+        self.bidirectional = bidirectional
 
         # 1) encoder
         if ae_model_name == "PNC16":
@@ -434,13 +436,19 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             self.encoder = PNC32Encoder()
 
         #2 Feed forward zero-padded partial latents to LSTM. LSTM sees input_channels=total_channels 
-        self.conv_lstm = ConvLSTM(input_channels=total_channels, hidden_channels=hidden_channels)
+        lstm_out_channels = 2 * hidden_channels if bidirectional else hidden_channels
 
-        # 3) If LSTM's hidden state dimensions/channels != total_channels, map LSTM's hidden state channels to total_channels (which is input to decoder) e.g. if hidden_channels=32, total_channels=16 for PNC16
-        if hidden_channels != total_channels:
-            self.map_lstm2pred = nn.Conv2d(hidden_channels, total_channels, kernel_size=1, stride=1, padding=0)
+        if bidirectional:
+            self.conv_lstm = ConvBiLSTM(input_channels=total_channels, hidden_channels=hidden_channels)
         else:
-            self.map_lstm2pred = None
+            self.conv_lstm = ConvLSTM(input_channels=total_channels, hidden_channels=hidden_channels)
+
+        print("lstm_out_channels:", lstm_out_channels)
+        # 3) If LSTM's hidden state dimensions/channels != total_channels, map LSTM's hidden state channels to total_channels (which is input to decoder) e.g. if hidden_channels=32, total_channels=16 for PNC16
+        if lstm_out_channels != total_channels:
+            self.project_lstm_to_latent = nn.Conv2d(lstm_out_channels, total_channels, kernel_size=1, stride=1, padding=0)
+        else: 
+            self.project_lstm_to_latent = None
         
         # 5) finally, decoder
         if ae_model_name == "PNC16":
@@ -455,6 +463,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         x_seq: (batch_size, seq_len, 3, 224, 224)   
         returns (batch_size, seq_len, 3, 224, 224) reconstructed video frames/imgs sequence
         """
+        # print(self.conv_lstm, self.project_lstm_to_latent, self.decoder)
         bsz, seq_len, c, h, w = x_seq.shape
         drop_levels = []
         # 1) Encode + randomly drop channels
@@ -466,7 +475,6 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         
             # 2) Randomly drop tail channels/features
             if drop > 0:
-                # print("Drop = ", drop)
                 features = features.clone()  # avoid in-place modifications
                 if self.training or eval_real:
                     # Training: randomly drop 0 to `drop` tail channels per sample.
@@ -495,12 +503,14 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         # stack features along the time dimension (seq_len dimension = 1)
         lstm_input = torch.stack(partial_list, dim=1) # (batch, seq_len, 16, 32, 32)
 
-        lstm_out = self.conv_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32)
-    
+        # lstm_out = self.conv_bi_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32)
+        lstm_out = self.conv_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32) 
+
         # if needed, map hidden state to total_channels, and finally decode!!
-        if self.map_lstm2pred is not None:
+        if self.project_lstm_to_latent is not None:
             # Flatten batch and time dimensions for mapping
-            imputed_latents = self.map_lstm2pred(lstm_out.view(-1, self.hidden_channels, 32, 32))
+            lstm_channels = 2 * self.hidden_channels if self.bidirectional else self.hidden_channels
+            imputed_latents = self.project_lstm_to_latent(lstm_out.view(-1, lstm_channels, 32, 32))
             # Reshape back to (batch, seq_len, total_channels, 32, 32)
             imputed_latents = imputed_latents.view(bsz, seq_len, self.total_channels, 32, 32) # Example: 32 hidden channels -> 16 total channels (PNC16 AE)
         else:
