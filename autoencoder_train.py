@@ -128,11 +128,11 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None,
             # tail_len = torch.randint(0, max_tail_length, (1,)).item() if max_tail_length else None
             # print("Eval tail length: ", tail_len)
             inputs = inputs.to(device)
-            outputs = model(x=inputs, tail_length=max_tail_length, quantize_latent=quantize)
+            outputs = model(x=inputs, tail_length=16, quantize_latent=quantize)
 
 
             ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
-            frame_latent = model.module.encode(inputs[0]) # .module b/c of DataParallel model
+            frame_latent = model.encode(inputs[0]) # .module b/c of DataParallel model
 
             features_cpu = frame_latent.detach().cpu().numpy()
             features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
@@ -281,7 +281,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         for i, (inputs, filenames) in enumerate(test_loader):
             inputs = inputs.to(device)
-            num_dropped_features = 0 # NOTE: John, you manually set this constant during experimentation/evaluation? 
+            num_dropped_features = 30 # NOTE: John, you manually set this constant during experimentation/evaluation? 
             outputs = model(inputs, num_dropped_features, args.quantize)  # Forward pass through autoencoder
 
             # outputs is (batch_size, 3, image_h, image_w)

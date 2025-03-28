@@ -420,7 +420,7 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-    # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
+    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, lambda_val=args.lambda_val)
     # # save
     if drops > 0:
         torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")

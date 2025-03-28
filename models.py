@@ -309,8 +309,8 @@ class ConvLSTMCell(nn.Module):
         g = torch.tanh(gates[:, 3*chunk:4*chunk])
 
         # Update cell state and hidden state
-        c = f * c + i * g
-        h = o * torch.tanh(c)
+        c = f * c + i * g 
+        h = o * torch.tanh(c) 
         return h, c
     
 
