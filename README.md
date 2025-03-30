@@ -43,6 +43,7 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 - Make sure to ONLY do `python your_script.py` when you're in the GPU VM via `srun --pty bash`
 - OTHERWISE, do `srun python your_script.py` if you're OUTSIDE of the GPU VM.
 - If you're using PyTorch's DDP: `srun python -m torch.distributed.launch your_script.py`
+- If you want to run the bidirectional models or not, just find this line `model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=True or False)` and set to True/False! No extra work required!
 
 ### Journal: what I learned + conceptual stuff
 ##### What Is Redundancy? It means that the same critical information is stored in more than one place. In the context of an autoencoder’s latent space, redundancy means that even if some of the features (or channels) are lost or dropped, the remaining features still contain enough information to allow the decoder to reconstruct the original input accurately.
