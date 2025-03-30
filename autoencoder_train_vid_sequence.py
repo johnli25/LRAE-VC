@@ -23,9 +23,9 @@ class_map = {
 }
 
 test_img_names = {
-    "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003",
-    "Lifting_002", "Riding-Horse_006", "Run-Side_001",
-    "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
+    "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003", # just use this video for results to Matt Caesar
+    # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
+    # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
 
 class VideoFrameSequenceDataset(Dataset):
@@ -449,7 +449,7 @@ if __name__ == "__main__":
 
 
     # NOTE: for Experimental Evaluation
-    # final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
-    final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
+    final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
+    # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
     print(f"Final Test Loss For evaluation: {final_test_loss:.4f}")
     
