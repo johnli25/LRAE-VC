@@ -19,9 +19,9 @@ class_map = {
 }
 
 test_img_names = {
-    "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003", # "Diving-Side_001", 
-    "Lifting_002", "Riding-Horse_006", "Run-Side_001",
-    "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
+    "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003", 
+    # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
+    # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
 
 # NOTE: uncomment below if you're using UCF101
@@ -132,7 +132,7 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None,
 
 
             ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
-            frame_latent = model.module.encode(inputs[0])
+            frame_latent = model.encode(inputs[0])
             if quantize > 0:
                 features_cpu = frame_latent.detach().cpu().numpy()
                 features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
@@ -179,11 +179,13 @@ if __name__ == "__main__":
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
         parser.add_argument("--quantize", type=int, default=0, help="Quantize latent features by how many bits/levels")
+        parser.add_argument("--drops", type=int, default=0, help="Maximum tail length for feature random dropout")
         return parser.parse_args()
     
     args = parse_args()
 
     ## Hyperparameters
+    tail_len_drops = args.drops
     num_epochs = args.epochs
     batch_size = 32
     learning_rate = 1e-3
@@ -235,18 +237,15 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    max_tail_length = None
     if args.model == "PNC":
         model = PNC_Autoencoder()
         max_tail_length = 10 # true PNC
 
     if args.model == "PNC16":
         model = PNC16()
-        max_tail_length = 12
 
     if args.model == "PNC32":
         model = PNC32()
-        # max_tail_length = 32
 
     if args.model == "TestNew":
         model = TestNew()
@@ -262,10 +261,40 @@ if __name__ == "__main__":
         print(f"Using {torch.cuda.device_count()} GPUs")
         model = nn.DataParallel(model)
 
+    # NOTE: use this function to convert from DataParallel model to normal model. CURRENTLY NOT USED FOR PNC32_final_w_taildrops.pth!!
+    def convertFromDataParallelNormal(checkpoint):
+        new_checkpoint = {}
+        for key, value in checkpoint.items():
+            new_key = key
+            if key.startswith("module."):
+                new_key = key[len("module."):]
+            new_checkpoint[new_key] = value
+        return new_checkpoint
+    
+    # NOTE: use this function to convert from normal model to DataParallel model. CURRENTLY NOT USED FOR PNC32_final_w_taildrops.pth!!
+    def convertFromNormalToDataParallel(checkpoint):
+        new_checkpoint = {}
+        for key, value in checkpoint.items():
+            new_key = key
+            if not key.startswith("module."):
+                new_key = "module." + key
+            new_checkpoint[new_key] = value
+        return new_checkpoint
+
     # if args.model_path exists, load and continue training or evaluate from there
     if args.model_path:
         print(f"Loading model weights from {args.model_path}")
-        model.load_state_dict(torch.load(args.model_path, map_location=device))
+        checkpoint = torch.load(args.model_path, map_location=device)
+        
+        # # Check if the model is in DataParallel mode
+        # if any(key.startswith("module.") for key in checkpoint.keys()):
+        #     print("Converting from DataParallel model to normal model")
+        #     checkpoint = convertFromDataParallelNormal(checkpoint)
+        # else:
+        #     print("Converting from normal model to DataParallel model")
+        #     checkpoint = convertFromNormalToDataParallel(checkpoint)
+        
+        model.load_state_dict(checkpoint)
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
@@ -278,15 +307,14 @@ if __name__ == "__main__":
         print(f"Creating directory: {output_path}")
         os.makedirs(output_path)
 
-    final_test_loss = eval_autoencoder(model, test_loader, criterion, device, quantize=args.quantize) # NOTE: John, you manually set this constant during experimentation/evaluation?
+    final_test_loss = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drops, quantize=args.quantize)
     print(f"Final Test Loss: {final_test_loss:.4f}")
 
     model.eval()  # Put the autoencoder in eval mode
     with torch.no_grad():
         for i, (inputs, filenames) in enumerate(test_loader):
             inputs = inputs.to(device)
-            num_dropped_features = 30 # NOTE: John, you manually set this constant during experimentation/evaluation? 
-            outputs = model(inputs, num_dropped_features, args.quantize)  # Forward pass through autoencoder
+            outputs = model(inputs, tail_len_drops, args.quantize)  # Forward pass through autoencoder
 
             # outputs is (batch_size, 3, image_h, image_w)
             print(f"Batch {i+1}/{len(test_loader)}, Output shape: {outputs.shape}")
