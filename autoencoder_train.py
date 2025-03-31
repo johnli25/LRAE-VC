@@ -20,8 +20,8 @@ class_map = {
 
 test_img_names = {
     "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003", 
-    "Lifting_002", "Riding-Horse_006", "Run-Side_001",
-    "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
+    # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
+    # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
 
 # NOTE: uncomment below if you're using UCF101
@@ -132,7 +132,7 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None,
 
 
             ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
-            frame_latent = model.module.encode(inputs[0])
+            frame_latent = model.encode(inputs[0])
             if quantize > 0:
                 features_cpu = frame_latent.detach().cpu().numpy()
                 features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
@@ -144,8 +144,8 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None,
                 features_cpu = frame_latent.detach().cpu().numpy().astype(np.float32)
                 compressed = zlib.compress(features_cpu.tobytes())
                 latent_num_bytes = len(compressed)
-                print(f"[Simulated Compression] Frame 0 compressed size (float32): {latent_num_bytes} bytes "
-                    f"(Original shape: {tuple(frame_latent.shape)})")
+                # print(f"[Simulated Compression] Frame 0 compressed size (float32): {latent_num_bytes} bytes "
+                #     f"(Original shape: {tuple(frame_latent.shape)})")
             ##############
 
             loss = criterion(outputs, inputs)
@@ -289,12 +289,12 @@ if __name__ == "__main__":
         # NOTE: JUST FOR JOHN'S VM B/C IT USES 2 GPUs: 
         checkpoint = convertFromNormalToDataParallel(checkpoint)
         
-        # if any(key.startswith("module.") for key in checkpoint.keys()):
-        #     print("Converting from DataParallel model to normal model")
-        #     checkpoint = convertFromDataParallelNormal(checkpoint)
-        # else:
-        #     print("Converting from normal model to DataParallel model")
-        #     checkpoint = convertFromNormalToDataParallel(checkpoint)
+        if any(key.startswith("module.") for key in checkpoint.keys()):
+            print("Converting from DataParallel model to normal model")
+            checkpoint = convertFromDataParallelNormal(checkpoint)
+        else:
+            print("Converting from normal model to DataParallel model")
+            checkpoint = convertFromNormalToDataParallel(checkpoint)
         
         model.load_state_dict(checkpoint)
 
@@ -314,6 +314,17 @@ if __name__ == "__main__":
     #     print(f"Creating directory: {output_path}")
     #     os.makedirs(output_path)
 
+    
+    # NOTE: uncomment below for hardcoded tail_len_drops for more AUTOMATED evaluation. Otherwise, leave commented in!
+    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28, 29]
+    for tail_len_drop in tail_len_drops:
+        print(f"Tail length: {tail_len_drop}")
+        final_test_loss = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drop, quantize=args.quantize)
+        print(f"Final Test Loss: {final_test_loss:.6f}")
+
+
+    # final_test_loss = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drops, quantize=args.quantize)
+    # print(f"Final Test Loss: {final_test_loss:.4f}")
 
     # model.eval()  # Put the autoencoder in eval mode
     # with torch.no_grad():
