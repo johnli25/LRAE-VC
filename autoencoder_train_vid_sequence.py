@@ -138,6 +138,12 @@ def plot_train_val_loss(train_losses, val_losses):
     plt.show()
 
 
+def PSNR(reconstructed, original):
+    mse = nn.MSELoss()(reconstructed, original)
+    psnr = 10 * torch.log10(1 / mse)
+    return psnr.item()
+
+
 def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0, quantize=False):
     train_losses, val_losses = [], []
     best_val_loss = float('inf')
@@ -206,7 +212,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
 
 def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, quantize=False):
     ae_model.eval()
-    running_loss = 0.0
+    running_loss, running_psnr = 0.0, 0.0
     output_dir = "ae_lstm_output_test" if save_sample == "test" else "ae_lstm_output_val"
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
@@ -219,6 +225,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
             outputs, _, _ = ae_model(x_seq=frames_tensor, drop=drop, quantize=quantize) # NOTE: returns reconstructed frames of shape (batch_size, seq_len, 3, 224, 224) AND imputed latents of shape (batch_size, seq_len, 16, 32, 32)
             loss = criterion(outputs, frames_tensor)
             running_loss += loss.item()
+            running_psnr += PSNR(outputs, frames_tensor)
             
             ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
             # frame_latent = model.module.encoder(frames_tensor[0][0]) # encode the first frame of the first video sequence in batch
@@ -255,7 +262,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
                         combined_frame = torch.cat((frame_input, frame_output), dim=2)  # Concatenate along the width dimension
                         vutils.save_image(combined_frame, file_path)
 
-    return running_loss / len(dataloader)
+    return running_loss / len(dataloader), running_psnr / len(dataloader)
 
 def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quantize=False, consecutive=0):
     ae_model.eval()
@@ -541,8 +548,13 @@ if __name__ == "__main__":
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
     # NOTE: for Experimental Evaluation
+    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28, 29]
+    for drop in tail_len_drops:
+        final_test_loss, final_test_psnr = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
+        print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} for tail_len_drops = {drop}")
+
     # final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
-    final_test_loss = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=1) # consecutive drops
+    # final_test_loss = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=1) # consecutive drops
     # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
-    print(f"Final Test Loss For evaluation: {final_test_loss:.4f}")
+    # print(f"Final Test Loss For evaluation: {final_test_loss:.6f}")
     
