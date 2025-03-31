@@ -478,10 +478,23 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                 features = features.clone()  # avoid in-place modifications
                 # use consecutive dropout if specified
                 if eval_consecutive is not None:
+                    # NOTE: Using below code, the drop is applied on the last frame of each cycle only (when t % (eval_consecutive+1) equals eval_consecutive)
+                    # consecutive_drops = (
+                    #     torch.full((features.size(0),), drop, device=features.device)
+                    #     if t % (eval_consecutive + 1) == eval_consecutive
+                    #     else torch.zeros((features.size(0),), device=features.device)
+                    # )
+
+                    # NOTE: Using below code, the first frame of each cycle (when t % (eval_consecutive+1) drops 0 features, and the subsequent eval_consecutive frames drop 'drop' features) 
+                    # if t == 0:
+                    #     consecutive_drops = torch.full((features.size(0),), drop, device=features.device)
+                    # elif t == 1: # or t == 2 or t == 3:
+                    #     consecutive_drops = torch.zeros((features.size(0),), device=features.device)
+                    # else:
                     consecutive_drops = (
-                        torch.full((features.size(0),), drop, device=features.device)
-                        if t % (eval_consecutive + 1) == eval_consecutive
-                        else torch.zeros((features.size(0),), device=features.device)
+                        torch.zeros((features.size(0),), device=features.device)
+                        if t % (eval_consecutive + 1) != 0
+                        else torch.full((features.size(0),), drop, device=features.device)
                     )
 
                     for i, consecutive_drop in enumerate(consecutive_drops):
