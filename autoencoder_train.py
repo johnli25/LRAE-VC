@@ -20,8 +20,8 @@ class_map = {
 
 test_img_names = {
     "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003", 
-    # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
-    # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
+    "Lifting_002", "Riding-Horse_006", "Run-Side_001",
+    "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
 
 # NOTE: uncomment below if you're using UCF101
@@ -132,7 +132,7 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None,
 
 
             ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
-            frame_latent = model.encode(inputs[0])
+            frame_latent = model.module.encode(inputs[0])
             if quantize > 0:
                 features_cpu = frame_latent.detach().cpu().numpy()
                 features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
@@ -286,7 +286,9 @@ if __name__ == "__main__":
         print(f"Loading model weights from {args.model_path}")
         checkpoint = torch.load(args.model_path, map_location=device)
         
-        # # Check if the model is in DataParallel mode
+        # NOTE: JUST FOR JOHN'S VM B/C IT USES 2 GPUs: 
+        checkpoint = convertFromNormalToDataParallel(checkpoint)
+        
         # if any(key.startswith("module.") for key in checkpoint.keys()):
         #     print("Converting from DataParallel model to normal model")
         #     checkpoint = convertFromDataParallelNormal(checkpoint)

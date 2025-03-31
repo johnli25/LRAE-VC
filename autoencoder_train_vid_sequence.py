@@ -13,6 +13,7 @@ from tqdm import tqdm
 import random
 import torchvision.utils as vutils
 import zlib 
+import shutil
 
 torch.cuda.empty_cache()
 
@@ -23,7 +24,8 @@ class_map = {
 }
 
 test_img_names = {
-    "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003", # just use this video for results to Matt Caesar
+    "Diving-Side_001", 
+    "Golf-Swing-Front_005", "Kicking-Front_003", # just use these video(s) for results to Matt Caesar
     # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
@@ -40,7 +42,7 @@ class VideoFrameSequenceDataset(Dataset):
         self.step_thru_frames = step_thru_frames    
         self.transform = transform
 
-        # 1) Gather all frame paths, grouped by video "prefix".
+        # 1) gather all frame paths, grouped by video "prefix".
         #    We'll define the "prefix" as everything except the frame index at the end.
         #    E.g. "Diving-Side_001" is the prefix; the frame index is after the last underscore.
         self.video_dict = {}
@@ -73,7 +75,6 @@ class VideoFrameSequenceDataset(Dataset):
                 return int(idx_str) if idx_str.isdigit() else -1
 
             self.video_dict[prefix].sort(key=extract_frame_idx)
-        # print("self.video_dict AFTER SORTING: ", self.video_dict.keys())
         
         # 3) Build a global list of (prefix, start_idx) for each valid subsequence
         self.start_samples = []  # each element is (prefix, start_frame_index_in_this_video) # NOTE: the way self.start_samples is constructed excludes the last seq_len - 1 frames of each video from being used as the starting index of a sequence
@@ -93,7 +94,6 @@ class VideoFrameSequenceDataset(Dataset):
                 # Add all start indices to self.start_samples
                 self.start_samples.extend((prefix, idx) for idx in start_indices)
         
-        # print("samples: ", self.start_samples[:73])  # Print a few samples
 
     def __len__(self):
         return len(self.start_samples)
@@ -207,6 +207,9 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
 def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, quantize=False):
     ae_model.eval()
     running_loss = 0.0
+    output_dir = "ae_lstm_output_test" if save_sample == "test" else "ae_lstm_output_val"
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
     os.makedirs("ae_lstm_output_test", exist_ok=True)
     # os.makedirs("ae_lstm_output_val", exist_ok=True)
 
@@ -255,9 +258,48 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
     return running_loss / len(dataloader)
 
 
+def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quantize=False, consecutive=0):
+    ae_model.eval()
+    total_loss, total_dropped_frames = 0.0, 0
+
+    output_dir = "ae_lstm_output_consecutive" 
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    with torch.no_grad():
+        for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
+            frames_tensor = frames.to(device)
+            outputs, _, drop_levels = ae_model(x_seq=frames_tensor, drop=drop, eval_consecutive=consecutive, quantize=quantize)
+            # Compute loss only on frames where features were dropped (i.e. drop_levels != 0).
+            for seq_idx in range(frames_tensor.size(0)):
+                for frame_idx in range(frames_tensor.size(1)):
+                    if len(drop_levels) > 0 and drop_levels[seq_idx][frame_idx] != 0:
+                        frame_loss = criterion(outputs[seq_idx, frame_idx].unsqueeze(0),
+                                                 frames_tensor[seq_idx, frame_idx].unsqueeze(0))
+                        total_loss += frame_loss.item()
+                        total_dropped_frames += 1
+
+            # Save side-by-side images for each frame.
+            for seq_idx in range(frames_tensor.size(0)):
+                for frame_idx in range(frames_tensor.size(1)):
+                    file_name = f"{prefix_[seq_idx]}_{start_idx_[seq_idx]}_{frame_idx}_drop{drop_levels[seq_idx][frame_idx]}.png" 
+                    file_path = os.path.join(output_dir, file_name)
+                    frame_input = frames_tensor[seq_idx, frame_idx].cpu()
+                    frame_output = outputs[seq_idx, frame_idx].cpu()
+                    combined_frame = torch.cat((frame_input, frame_output), dim=2)
+                    vutils.save_image(combined_frame, file_path)
+
+    average_loss = total_loss / total_dropped_frames if total_dropped_frames > 0 else 0.0
+    return average_loss
+
+
 def evaluate_realistic(ae_model, dataloader, criterion, device, input_drop=32, quantize=False):
     ae_model.eval()
     running_loss = 0.0
+    output_dir = "ae_lstm_output_test_realistic"
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
     os.makedirs("ae_lstm_output_test_realistic", exist_ok=True)
 
     with torch.no_grad():
@@ -283,6 +325,7 @@ def evaluate_realistic(ae_model, dataloader, criterion, device, input_drop=32, q
                     vutils.save_image(combined_frame, file_path)
 
     return running_loss / len(dataloader)
+
 
 
 if __name__ == "__main__":
@@ -343,8 +386,6 @@ if __name__ == "__main__":
     print(f"Test subsequences: {len(test_indices)}")
     # Shuffle train_val_indices
     np.random.shuffle(train_val_indices)
-    # Below is a print sanity check: 
-    # for i in range(5): print("First 5 dataset elems:", dataset[train_val_indices[i]][1], dataset[train_val_indices[i]][2])
 
     # Now pick 90% for train, 10% for val
     train_size = int(0.9 * len(train_val_indices))
@@ -370,41 +411,20 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Example: pick your autoencoder model
-    if args.model == "PNC16":
-        model = PNC16()
-    elif args.model == "conv_lstm_PNC16_ae": # currently based on PNC16, which is a 16-feature/channel (for encode) model
-        model = ConvLSTM_AE(total_channels=16, hidden_channels=32, ae_model_name="PNC16")
-    elif args.model == "conv_lstm_PNC32_ae":
-        model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=True)
-
-    model = model.to(device)
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs")
-        model = nn.DataParallel(model)    
-
-
-    # NOTE: use this function to convert from DataParallel model to normal model
     def convertFromDataParallelNormal(checkpoint):
         new_checkpoint = {}
         for key, value in checkpoint.items():
-            new_key = key
-            if key.startswith("module."):
-                new_key = key[len("module."):]
+            new_key = key[len("module."):] if key.startswith("module.") else key
             new_checkpoint[new_key] = value
         return new_checkpoint
-    
-    # NOTE: use this function to convert from normal model to DataParallel model
+
     def convertFromNormalToDataParallel(checkpoint):
         new_checkpoint = {}
         for key, value in checkpoint.items():
-            new_key = key
-            if not key.startswith("module."):
-                new_key = "module." + key
+            new_key = "module." + key if not key.startswith("module.") else key
             new_checkpoint[new_key] = value
         return new_checkpoint
-    
-    # NOTE: use this function to update checkpoint with any new keys
+
     def updateCheckpointWithNewKeys(model, checkpoint):
         model_dict = model.state_dict()
         missing_keys = set(model_dict.keys()) - set(checkpoint.keys())
@@ -414,26 +434,54 @@ if __name__ == "__main__":
             print("Add missing key with default initialization:", key)
             checkpoint[key] = model_dict[key]
         return checkpoint
-    
-    # NOTE: Load a pretrained model and update with new parameters if necessary.
-    def loadPretrainedModel(model, model_path, device, use_dataparallel=True):
-        # Load checkpoint from file.
+
+    # --- Load checkpoint with automatic conversion ---
+    def loadPretrainedModel(model, model_path, device):
         checkpoint = torch.load(model_path, map_location=device)
-        # Convert the checkpoint to DataParallel format if desired.
-        if use_dataparallel:
+        
+        # Auto-detect if we should use DataParallel based on GPU count.
+        use_dataparallel = (torch.cuda.device_count() >= 2)
+        
+        # Determine the checkpoint's key format.
+        checkpoint_keys = list(checkpoint.keys())
+        if not checkpoint_keys:
+            raise ValueError("Loaded checkpoint has no keys.")
+        checkpoint_is_dp = checkpoint_keys[0].startswith("module.")
+
+        # Convert keys only if necessary.
+        if use_dataparallel and not checkpoint_is_dp:
+            print("Converting checkpoint from normal to DataParallel format.")
             checkpoint = convertFromNormalToDataParallel(checkpoint)
-        else:
+        elif (not use_dataparallel) and checkpoint_is_dp:
+            print("Converting checkpoint from DataParallel to normal format.")
             checkpoint = convertFromDataParallelNormal(checkpoint)
-        # Update checkpoint with any missing keys (e.g., new parameters like drift)
+        else:
+            print("Checkpoint format matches the current model setup.")
+
         checkpoint = updateCheckpointWithNewKeys(model, checkpoint)
-        # Load the state dict into the model.
         model.load_state_dict(checkpoint)
         print(f"Loaded model weights from {model_path}")
         return model
-    
 
+    # Example: pick your autoencoder model
+    if args.model == "PNC16":
+        model = PNC16()
+    elif args.model == "conv_lstm_PNC16_ae":
+        model = ConvLSTM_AE(total_channels=16, hidden_channels=32, ae_model_name="PNC16")
+    elif args.model == "conv_lstm_PNC32_ae":
+        model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=False)
+
+    # --- Model Initialization ---
+    model = model.to(device)
+
+    # Wrap with DataParallel if two or more GPUs are available.
+    if torch.cuda.device_count() >= 2:
+        print(f"Using {torch.cuda.device_count()} GPUs with DataParallel.")
+        model = nn.DataParallel(model)
+
+    # Load pretrained checkpoint, converting keys as needed.
     if args.model_path:
-        model = loadPretrainedModel(model, args.model_path, device, use_dataparallel=True)
+        model = loadPretrainedModel(model, args.model_path, device)
 
     # Define loss/optimizer
     criterion = nn.MSELoss()
@@ -447,9 +495,9 @@ if __name__ == "__main__":
     #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
-
     # NOTE: for Experimental Evaluation
     final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
+    # final_test_loss = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=3) # consecutive drops
     # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
     print(f"Final Test Loss For evaluation: {final_test_loss:.4f}")
     
