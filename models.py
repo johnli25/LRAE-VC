@@ -458,7 +458,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             print("Using PNC32 Decoder")
             self.decoder = PNC32Decoder()
 
-    def forward(self, x_seq, drop=0, eval_real=False, quantize=False):
+    def forward(self, x_seq, drop=0, eval_random=False, eval_consecutive=None, quantize=False):
         """
         x_seq: (batch_size, seq_len, 3, 224, 224)   
         returns (batch_size, seq_len, 3, 224, 224) reconstructed video frames/imgs sequence
@@ -476,14 +476,28 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             # 2) Randomly drop tail channels/features
             if drop > 0:
                 features = features.clone()  # avoid in-place modifications
-                if self.training or eval_real:
+                # use consecutive dropout if specified
+                if eval_consecutive is not None:
+                    consecutive_drops = (
+                        torch.full((features.size(0),), drop, device=features.device)
+                        if t % (eval_consecutive + 1) == eval_consecutive
+                        else torch.zeros((features.size(0),), device=features.device)
+                    )
+
+                    for i, consecutive_drop in enumerate(consecutive_drops):
+                        current_drop.append(consecutive_drop.item())
+                        if consecutive_drop > 0:
+                            features[i, -consecutive_drop:, :, :] = 0.0
+
+                # otherwise use random dropout logic (in training or eval_random mode)    
+                elif self.training or eval_random:
                     # Training: randomly drop 0 to `drop` tail channels per sample.
                     random_drops = torch.randint(low=0, high=drop + 1, size=(features.size(0),))
                     for i, random_drop in enumerate(random_drops):
-                        # if eval_real:
                         current_drop.append(random_drop.item())
                         if random_drop > 0:
                             features[i, -random_drop:, :, :] = 0.0
+                # if none of the above, apply constant drop 
                 else:
                     # Evaluation: drop a CONSTANT number of tail channels (e.g., exactly 'drop' amt of channels)
                     features[:, -drop:, :, :] = 0.0
@@ -491,7 +505,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             if quantize > 0:
                 features = self.quantize(features, levels=quantize)
 
-            if self.training or eval_real: # if eval_real, append drop levels for each sample
+            if self.training or eval_random or eval_consecutive != None: # if eval_real, append drop levels for each sample
                 drop_levels.append(current_drop)
             partial_list.append(features) # (batch, 16, 32, 32)
 
@@ -525,7 +539,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         
         recon = torch.cat(outputs, dim=1)  # (batch, seq_len, 3, 224, 224)
 
-        if eval_real:
+        if eval_random or eval_consecutive != None:
             return recon, imputed_latents, drop_levels_tensor
         else:
             return recon, imputed_latents, None
