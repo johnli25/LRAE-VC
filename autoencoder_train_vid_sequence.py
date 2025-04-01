@@ -138,10 +138,13 @@ def plot_train_val_loss(train_losses, val_losses):
     plt.show()
 
 
-def PSNR(reconstructed, original):
-    mse = nn.MSELoss()(reconstructed, original)
-    psnr = 10 * torch.log10(1 / mse)
-    return psnr.item()
+# def psnr(reconstructed, original):
+#     mse = nn.MSELoss()(reconstructed, original)
+#     psnr = 10 * torch.log10(1 / mse)
+#     return psnr.item()
+    
+def psnr(mse):
+    return 20 * np.log10(1) - 10 * np.log10(mse)
 
 
 def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0, quantize=False):
@@ -225,7 +228,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
             outputs, _, _ = ae_model(x_seq=frames_tensor, drop=drop, quantize=quantize) # NOTE: returns reconstructed frames of shape (batch_size, seq_len, 3, 224, 224) AND imputed latents of shape (batch_size, seq_len, 16, 32, 32)
             loss = criterion(outputs, frames_tensor)
             running_loss += loss.item()
-            running_psnr += PSNR(outputs, frames_tensor)
+            # running_psnr += psnr(outputs, frames_tensor)
             
             ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
             # frame_latent = model.module.encoder(frames_tensor[0][0]) # encode the first frame of the first video sequence in batch
@@ -269,8 +272,8 @@ def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quanti
     total_loss, total_dropped_frames = 0.0, 0
 
     output_dir = "ae_lstm_output_consecutive" 
-    if os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
+    # if os.path.exists(output_dir):
+    #     shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     saved_frames = set()  # keys will be (prefix, true_frame)
 
@@ -296,10 +299,14 @@ def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quanti
                 for frame_idx in range(frames_tensor.size(1)):
                     true_frame = true_start + frame_idx
                     key = (str(prefix_[seq_idx]).strip(), int(start_idx_[seq_idx]) + frame_idx) # there are some slight formatting subtleties here, so we use str.strip() + int() conversion to more cleanly parse!
+                    drop_val = drop_levels[seq_idx][frame_idx]
+                    # Only save if drop > 0 or it's the very first frame
+                    if drop_val == 0 and not (seq_idx == 0 and frame_idx == 0):
+                        continue
                     if key in saved_frames:
                         continue
                     saved_frames.add(key)
-                    file_name = f"{prefix_[seq_idx]}_{true_frame}_drop{drop_levels[seq_idx][frame_idx]}.png" 
+                    file_name = f"{prefix_[seq_idx]}_{true_frame}_drop{drop_val}.png" 
                     file_path = os.path.join(output_dir, file_name)
                     frame_input = frames_tensor[seq_idx, frame_idx].cpu()
                     frame_output = outputs[seq_idx, frame_idx].cpu()
@@ -547,14 +554,16 @@ if __name__ == "__main__":
     #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
-    # NOTE: for Experimental Evaluation
-    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28, 29]
-    for drop in tail_len_drops:
-        final_test_loss, final_test_psnr = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
-        print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} for tail_len_drops = {drop}")
+    # NOTE: for automated (all possible drops) experimental evaluation 
+    # tail_len_drops = [3, 6, 10, 13, 16, 19, 22, 26, 28, 29]# NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
+    # for drop in tail_len_drops:
+    #     # final_test_loss, _ = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
+    #     final_test_loss = evaluate_consecutive(model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=1) # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
+    #     final_test_psnr = psnr(final_test_loss)
+    #     print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} for tail_len_drops = {drop}")
 
     # final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
-    # final_test_loss = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=1) # consecutive drops
+    final_test_loss = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=1) # consecutive drops
     # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
-    # print(f"Final Test Loss For evaluation: {final_test_loss:.6f}")
+    print(f"Final Test Loss For evaluation: {final_test_loss:.6f}")
     

@@ -143,10 +143,88 @@ def create_videos_grouped_by_prefix_and_start(input_folder, output_folder, frame
         # Remove the temporary directory.
         os.system(f"rm -rf '{os.path.join(output_folder, 'temp_video')}'")
 
+def create_two_split_videos_grouped_by_prefix_and_start(input_folder, output_folder, framerate=10):
+    """
+    Similar to `create_videos_grouped_by_prefix_and_start`, but splits each 448x224 image into two 224x224 halves:
+    - The left half is the ground truth.
+    - The right half is the reconstruction.
 
-# Example usage:
-# First, process the images to select the best (lowest MSE) version:
-process_images_select_best_mse(input_folder="ae_lstm_output_test", output_folder="PNC32_ae_lstm_output_19drops")
+    Two sets of videos are created for each group:
+    - One video for the ground truth frames.
+    - One video for the reconstructed frames.
+    """
+    video_output_folder_gt = os.path.join(output_folder, "videos_gt")
+    video_output_folder_recon = os.path.join(output_folder, "videos_recon")
+    os.makedirs(video_output_folder_gt, exist_ok=True)
+    os.makedirs(video_output_folder_recon, exist_ok=True)
+    
+    image_files = [f for f in os.listdir(input_folder) if f.endswith(".png")]
+    groups = {}
+
+    for f in image_files:
+        try:
+            prefix, start_idx_str, frame_idx_str, drop = f[:-4].rsplit('_', 3)
+            start_idx = int(start_idx_str)
+            frame_idx = int(frame_idx_str)
+            actual_frame = start_idx + frame_idx
+        except Exception as e:
+            print(f"Skipping file {f}: could not parse filename ({e}).")
+            continue
+        key = (prefix, start_idx)
+        groups.setdefault(key, []).append((actual_frame, f))
+    
+    for (prefix, start_idx), frames in groups.items():
+        frames.sort(key=lambda x: x[0])
+
+        temp_dir = os.path.join(output_folder, "temp_split_video", f"{prefix}_{start_idx}")
+        temp_gt_dir = os.path.join(temp_dir, "gt")
+        temp_recon_dir = os.path.join(temp_dir, "recon")
+        os.makedirs(temp_gt_dir, exist_ok=True)
+        os.makedirs(temp_recon_dir, exist_ok=True)
+        
+        for i, (_, file_name) in enumerate(frames):
+            try:
+                image_path = os.path.join(input_folder, file_name)
+                image = Image.open(image_path).convert("RGB")
+                width, height = image.size
+                if width != 448 or height != 224:
+                    print(f"Skipping {file_name}: unexpected image size {width}x{height}")
+                    continue
+
+                gt = image.crop((0, 0, 224, 224))
+                recon = image.crop((224, 0, 448, 224))
+
+                gt.save(os.path.join(temp_gt_dir, f"{i:06d}.png"))
+                recon.save(os.path.join(temp_recon_dir, f"{i:06d}.png"))
+
+            except Exception as e:
+                print(f"Error processing {file_name}: {e}")
+        
+        video_file_gt = os.path.join(video_output_folder_gt, f"{prefix}_{start_idx}_gt.mp4")
+        video_file_recon = os.path.join(video_output_folder_recon, f"{prefix}_{start_idx}_recon.mp4")
+
+        cmd_gt = (
+            f"ffmpeg -y -framerate {framerate} -i {temp_gt_dir}/%06d.png "
+            f"-c:v libx264 -pix_fmt yuv420p '{video_file_gt}'"
+        )
+        cmd_recon = (
+            f"ffmpeg -y -framerate {framerate} -i {temp_recon_dir}/%06d.png "
+            f"-c:v libx264 -pix_fmt yuv420p '{video_file_recon}'"
+        )
+
+        print(f"Creating ground truth video: {video_file_gt}")
+        subprocess.call(cmd_gt, shell=True)
+
+        print(f"Creating reconstruction video: {video_file_recon}")
+        subprocess.call(cmd_recon, shell=True)
+
+        # Clean up
+        os.system(f"rm -rf '{temp_dir}'")
+
+
+# Example usage: First, process the images to select the best (lowest MSE) version:
+# process_images_select_best_mse(input_folder="ae_lstm_output_test", output_folder="PNC32_ae_lstm_output_19drops")
 
 # Then, create videos from the processed images grouping by (prefix, start_idx):
-create_videos_grouped_by_prefix_and_start(input_folder="PNC32_ae_lstm_output_19drops", output_folder="PNC32_ae_lstm_output_19drops", framerate=10)
+# create_videos_grouped_by_prefix_and_start(input_folder="ae_lstm_output_consecutive", output_folder="ae_lstm_output_consecutive_videos", framerate=10)
+create_two_split_videos_grouped_by_prefix_and_start(input_folder="ae_lstm_output_consecutive", output_folder="ae_lstm_videos_consecutive_loss90_nframe1", framerate=10)
