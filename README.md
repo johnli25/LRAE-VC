@@ -1,4 +1,4 @@
-# LRAE-VC
+# LRAE-VC (Currently renaming/refactoring to CASTR) 
 
 ## Commands, Instructions, Setup
 - Setting up server, Conda, and GPUs (based on UIUC NCSA's Delta server): https://docs.google.com/document/d/1U5KpvcJr5ousA-zq9EcdzArJlSgpgM4wdYXXYV6tCLg/edit?tab=t.0
