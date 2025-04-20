@@ -518,7 +518,7 @@ if __name__ == "__main__":
             print("Checkpoint format matches the current model setup.")
 
         checkpoint = updateCheckpointWithNewKeys(model, checkpoint)
-        model.load_state_dict(checkpoint)
+        model.load_state_dict(checkpoint, strict=False)
         print(f"Loaded model weights from {model_path}")
         return model
 
@@ -562,8 +562,8 @@ if __name__ == "__main__":
     #     final_test_psnr = psnr(final_test_loss)
     #     print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} for tail_len_drops = {drop}")
 
-    # final_test_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
-    final_test_loss = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=1) # consecutive drops
+    final_test_loss, final_psnr_loss = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
+    # final_test_loss = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=1) # consecutive drops
     # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
-    print(f"Final Test Loss For evaluation: {final_test_loss:.6f}")
+    print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_psnr_loss:.6f} for tail_len_drops = {args.drops}")
     
