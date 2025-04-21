@@ -14,6 +14,7 @@ import random
 import torchvision.utils as vutils
 import zlib 
 import shutil
+from pytorch_msssim import ssim
 
 torch.cuda.empty_cache()
 
@@ -25,7 +26,7 @@ class_map = {
 
 test_img_names = {
     "Diving-Side_001", 
-    "Golf-Swing-Front_005", "Kicking-Front_003", # just use these video(s) for temporary results
+    # "Golf-Swing-Front_005", "Kicking-Front_003", # just use these video(s) for temporary results
     # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
@@ -209,7 +210,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
 
 def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, quantize=False):
     ae_model.eval()
-    total_mse, total_psnr, total_frames = 0.0, 0.0, 0
+    total_mse, total_psnr, total_ssim, total_frames = 0.0, 0.0, 0.0, 0
 
     output_dir = "ae_lstm_output_test" if save_sample == "test" else "ae_lstm_output_val"
     if os.path.exists(output_dir):
@@ -228,6 +229,16 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
                     frame_mse = nn.functional.mse_loss(pred, gt).item()
                     total_mse += frame_mse
                     total_psnr += psnr(frame_mse)
+
+                    # SSIM computation NOTE: add batch + channel dimension)
+                    frame_ssim = ssim(
+                        pred.unsqueeze(0), # shape: (1, 3, H, W)
+                        gt.unsqueeze(0), # shape: (1, 3, H, W)
+                        data_range=1.0,
+                        size_average=True
+                    ).item()
+                    total_ssim += frame_ssim
+
                     total_frames += 1
 
                     ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
@@ -254,12 +265,12 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
                         combined_frame = torch.cat((gt.cpu(), pred.cpu()), dim=2)
                         vutils.save_image(combined_frame, file_path)
 
-    return total_mse / total_frames, total_psnr / total_frames
+    return total_mse / total_frames, total_psnr / total_frames, total_ssim / total_frames
 
 
 def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quantize=False, consecutive=0):
     ae_model.eval()
-    total_mse, total_psnr, total_dropped_frames = 0.0, 0.0, 0
+    total_mse, total_psnr, total_ssim, total_dropped_frames = 0.0, 0.0, 0.0, 0
 
     output_dir = "ae_lstm_output_consecutive" 
     if os.path.exists(output_dir):
@@ -274,7 +285,7 @@ def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quanti
                 x_seq=frames_tensor, drop=drop,
                 eval_consecutive=consecutive, quantize=quantize
             )
-            print("drop_levels: ", drop_levels)
+            # print("drop_levels: ", drop_levels)
 
             for b in range(frames_tensor.size(0)):
                 for t in range(frames_tensor.size(1)):
@@ -284,6 +295,16 @@ def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quanti
                         frame_mse = nn.functional.mse_loss(pred, gt).item()
                         total_mse += frame_mse
                         total_psnr += psnr(frame_mse)
+
+                        # SSIM computation NOTE: add batch + channel dimension)
+                        frame_ssim = ssim(
+                            pred.unsqueeze(0), # shape: (1, 3, H, W)
+                            gt.unsqueeze(0), # shape: (1, 3, H, W)
+                            data_range=1.0,
+                            size_average=True
+                        ).item()
+                        total_ssim += frame_ssim
+
                         total_dropped_frames += 1
 
             # NOTE: Following code block purpose is ONLY TO SAVE true image and reconstructed image side by side.
@@ -310,7 +331,8 @@ def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quanti
 
     average_mse = total_mse / total_dropped_frames if total_dropped_frames > 0 else 0.0
     average_psnr = total_psnr / total_dropped_frames if total_dropped_frames > 0 else 0.0
-    return average_mse, average_psnr
+    average_ssim = total_ssim / total_dropped_frames if total_dropped_frames > 0 else 0.0
+    return average_mse, average_psnr, average_ssim
 
 
 def evaluate_realistic(ae_model, dataloader, criterion, device, input_drop=32, quantize=False):
@@ -514,14 +536,14 @@ if __name__ == "__main__":
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
     # NOTE: uncomment below to evaluate the model under {0, 10, 20, 30, 40, 50, 60, 70, 80, 90}% drops in one go! 
-    # tail_len_drops = [3, 6, 10, 13, 16, 19, 22, 26, 28, 29]# NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
-    # for drop in tail_len_drops:
-    #     # final_test_loss, final_test_psnr = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
-    #     final_test_loss = evaluate_consecutive(model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=1) # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
-    #     print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} for tail_len_drops = {drop}")
+    tail_len_drops = [3, 6, 10, 13, 16, 19, 22, 26, 28]# NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
+    for drop in tail_len_drops:
+        # final_test_loss, final_test_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
+        final_test_loss, final_test_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=1) # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
+        print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
 
-    final_test_loss, final_psnr = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
-    # final_test_loss, final_psnr = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=5) # consecutive drops
-    # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
-    print(f"Final Per-Frame Test Loss for test/evaluation MSE: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} for tail_len_drops = {args.drops}")
-    print("'Super Global' Dataset-wide: ", psnr(final_test_loss))
+    # final_test_loss, final_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
+    # # final_test_loss, final_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=5) # consecutive drops
+    # # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
+    # print(f"Final Per-Frame Test Loss for test/evaluation MSE: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim} for tail_len_drops = {args.drops}")
+    # print("'Super Global' Dataset-wide: ", psnr(final_test_loss))
