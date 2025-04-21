@@ -25,7 +25,7 @@ class_map = {
 
 test_img_names = {
     "Diving-Side_001", 
-    "Golf-Swing-Front_005", "Kicking-Front_003", # just use these video(s) for results to Matt Caesar
+    "Golf-Swing-Front_005", "Kicking-Front_003", # just use these video(s) for temporary results
     # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
@@ -137,20 +137,15 @@ def plot_train_val_loss(train_losses, val_losses):
     plt.savefig('train_val_loss_curve.png', dpi=300)
     plt.show()
 
-
-# def psnr(reconstructed, original):
-#     mse = nn.MSELoss()(reconstructed, original)
-#     psnr = 10 * torch.log10(1 / mse)
-#     return psnr.item()
     
 def psnr(mse):
+    return -10 * np.log10(mse) # NOTE: this is the simplified PSNR formula
     return 20 * np.log10(1) - 10 * np.log10(mse)
 
 
 def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0, quantize=False):
     train_losses, val_losses = [], []
     best_val_loss = float('inf')
-    # os.makedirs("ae_lstm_output_train", exist_ok=True)
     best_val_losses = {}
     if max_drops > 0: 
         drops = -1  # should be 1 less than the drops you ACTUALLY want to start at
@@ -220,7 +215,6 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs("ae_lstm_output_test", exist_ok=True)
-    # os.makedirs("ae_lstm_output_val", exist_ok=True)
 
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
@@ -228,7 +222,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
             outputs, _, _ = ae_model(x_seq=frames_tensor, drop=drop, quantize=quantize) # NOTE: returns reconstructed frames of shape (batch_size, seq_len, 3, 224, 224) AND imputed latents of shape (batch_size, seq_len, 16, 32, 32)
             loss = criterion(outputs, frames_tensor)
             running_loss += loss.item()
-            # running_psnr += psnr(outputs, frames_tensor)
+            running_psnr += psnr(loss.item())
             
             ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
             # frame_latent = model.module.encoder(frames_tensor[0][0]) # encode the first frame of the first video sequence in batch
@@ -272,8 +266,8 @@ def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quanti
     total_loss, total_dropped_frames = 0.0, 0
 
     output_dir = "ae_lstm_output_consecutive" 
-    # if os.path.exists(output_dir):
-    #     shutil.rmtree(output_dir)
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
     saved_frames = set()  # keys will be (prefix, true_frame)
 
@@ -386,7 +380,6 @@ def evaluate_realistic(ae_model, dataloader, criterion, device, input_drop=32, q
     return running_loss / len(dataloader)
 
 
-
 if __name__ == "__main__":
     def parse_args():
         parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
@@ -397,9 +390,8 @@ if __name__ == "__main__":
         parser.add_argument("--model_path", type=str, default=None, help="Path to the model weights")
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
         parser.add_argument("--drops", type=int, default=0, help="MAX dropout to enforce")
-        parser.add_argument("--lambda_val", type=float, default=0.0, help="Weight for latent loss")
-        # parser.add_argument("--quantize", action="store_true", help="Quantize latent features")
         parser.add_argument("--quantize", type=int, default=0, help="Quantize latent features by how many bits/levels")
+        parser.add_argument("--bidrectional", type=bool, default=False, help="Bidirectional ConvLSTM")
         return parser.parse_args()
 
     args = parse_args()
@@ -528,7 +520,7 @@ if __name__ == "__main__":
     elif args.model == "conv_lstm_PNC16_ae":
         model = ConvLSTM_AE(total_channels=16, hidden_channels=32, ae_model_name="PNC16")
     elif args.model == "conv_lstm_PNC32_ae":
-        model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=True)
+        model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=args.bidrectional)
 
     # --- Model Initialization ---
     model = model.to(device)
@@ -546,15 +538,16 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
+    # NOTE: uncomment below to train the model
     # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, quantize=args.quantize)
     # if drops > 0:
     #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
     #     print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
-    # else: # no dropout OR original modelx
+    # else: # no dropout OR original model
     #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
-    # NOTE: for automated (all possible drops) experimental evaluation 
+    # NOTE: uncomment below to evaluate the model under {0, 10, 20, 30, 40, 50, 60, 70, 80, 90}% drops.
     # tail_len_drops = [3, 6, 10, 13, 16, 19, 22, 26, 28, 29]# NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
     # for drop in tail_len_drops:
     #     # final_test_loss, _ = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
