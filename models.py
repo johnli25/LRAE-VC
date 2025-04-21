@@ -307,7 +307,7 @@ class ConvLSTM(nn.Module):
         self.cell = ConvLSTMCell(input_channels, hidden_channels)
         self.hidden_channels = hidden_channels
     
-    def forward(self, x_seq, drop_levels=[]):
+    def forward(self, x_seq):
         """
         x_seq: (batch, seq_len, input_channels, H, W)
         drop_levels: list of length seq_len, each element is a list of length batch_size
@@ -439,13 +439,6 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                 features = features.clone()  # avoid in-place modifications
                 # use consecutive dropout if specified
                 if eval_consecutive is not None:
-                    # NOTE: Using below code, the drop is applied on the last frame of each cycle only (when t % (eval_consecutive+1) equals eval_consecutive)
-                    # consecutive_drops = (
-                    #     torch.full((features.size(0),), drop, device=features.device)
-                    #     if t % (eval_consecutive + 1) == eval_consecutive
-                    #     else torch.zeros((features.size(0),), device=features.device)
-                    # )
-
                     # NOTE: Using below code, the first frame of each cycle (when t % (eval_consecutive+1) drops 0 features, and the subsequent eval_consecutive frames drop 'drop' features) 
                     consecutive_drops = (
                         torch.zeros((features.size(0),), device=features.device)
@@ -485,8 +478,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         # stack features along the time dimension (seq_len dimension = 1)
         lstm_input = torch.stack(partial_list, dim=1) # (batch, seq_len, 16, 32, 32)
 
-        # lstm_out = self.conv_bi_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32)
-        lstm_out = self.conv_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32) 
+        lstm_out = self.conv_lstm(x_seq=lstm_input) # (batch, seq_len, hidden_channels, 32, 32) 
 
         # if needed, map hidden state to total_channels, and finally decode!!
         if self.project_lstm_to_latent is not None:
