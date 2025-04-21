@@ -261,6 +261,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
 
     return running_loss / len(dataloader), running_psnr / len(dataloader)
 
+
 def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quantize=False, consecutive=0):
     ae_model.eval()
     total_loss, total_dropped_frames = 0.0, 0
@@ -276,7 +277,7 @@ def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quanti
             frames_tensor = frames.to(device)
             outputs, _, drop_levels = ae_model(x_seq=frames_tensor, drop=drop, eval_consecutive=consecutive, quantize=quantize)
             
-            # Compute loss only on frames where features were dropped (i.e. drop_levels != 0).
+            # Compute loss only on damaged frames (i.e. features dropped).
             for seq_idx in range(frames_tensor.size(0)):
                 for frame_idx in range(frames_tensor.size(1)):
                     if len(drop_levels) > 0 and drop_levels[seq_idx][frame_idx] != 0:
@@ -288,9 +289,9 @@ def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quanti
             # Save side-by-side images for each unique true frame.
             # We compute a "true frame number" as: true_frame = start_idx_[seq_idx] + frame_idx.
             # If that (prefix, true_frame) pair has already been saved, we skip saving.
-            for seq_idx in range(frames_tensor.size(0)):
+            for seq_idx in range(frames_tensor.size(0)): # for each sequence in the batch (B, )
                 true_start = start_idx_[seq_idx]  # starting frame index for this sequence
-                for frame_idx in range(frames_tensor.size(1)):
+                for frame_idx in range(frames_tensor.size(1)): # for each frame in the sequence (_, T, ...)
                     true_frame = true_start + frame_idx
                     key = (str(prefix_[seq_idx]).strip(), int(start_idx_[seq_idx]) + frame_idx) # there are some slight formatting subtleties here, so we use str.strip() + int() conversion to more cleanly parse!
                     drop_val = drop_levels[seq_idx][frame_idx]
@@ -391,7 +392,7 @@ if __name__ == "__main__":
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
         parser.add_argument("--drops", type=int, default=0, help="MAX dropout to enforce")
         parser.add_argument("--quantize", type=int, default=0, help="Quantize latent features by how many bits/levels")
-        parser.add_argument("--bidrectional", type=bool, default=False, help="Bidirectional ConvLSTM")
+        parser.add_argument("--bidirectional", type=bool, default=False, help="Bidirectional ConvLSTM")
         return parser.parse_args()
 
     args = parse_args()
@@ -520,7 +521,7 @@ if __name__ == "__main__":
     elif args.model == "conv_lstm_PNC16_ae":
         model = ConvLSTM_AE(total_channels=16, hidden_channels=32, ae_model_name="PNC16")
     elif args.model == "conv_lstm_PNC32_ae":
-        model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=args.bidrectional)
+        model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=args.bidirectional)
 
     # --- Model Initialization ---
     model = model.to(device)
