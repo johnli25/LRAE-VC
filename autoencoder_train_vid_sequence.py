@@ -15,6 +15,7 @@ import torchvision.utils as vutils
 import zlib 
 import shutil
 from pytorch_msssim import ssim
+import time
 
 torch.cuda.empty_cache()
 
@@ -220,8 +221,12 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
             frames_tensor = frames.to(device)
-            outputs, _, _ = ae_model(x_seq=frames_tensor, drop=drop, quantize=quantize)
 
+            start_time = time.time()
+            outputs, _, _ = ae_model(x_seq=frames_tensor, drop=drop, quantize=quantize)
+            end_time = time.time()
+            print(f"Time taken for whole batch of size {frames_tensor.size(0)} with {frames_tensor.size(1)} per batch, for total of {frames_tensor.size(0) * frames_tensor.size(1)} frames: {end_time - start_time:.2f} seconds")
+            
             for b in range(frames_tensor.size(0)): # for each batch
                 for t in range(frames_tensor.size(1)): # for each frame in video sequence
                     gt = frames_tensor[b, t]
@@ -242,7 +247,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
                     total_frames += 1
 
                     ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
-                    # frame_latent = ae_model.module.encoder(gt.unsqueeze(0)) if hasattr(ae_model, "module") else ae_model.encoder(gt.unsqueeze(0))
+                    # frame_latent = ae_model.module.encode(gt.unsqueeze(0)) if hasattr(ae_model, "module") else ae_model.encode(gt.unsqueeze(0))
                     # if quantize > 0:
                     #     features_cpu = frame_latent.squeeze(0).detach().cpu().numpy()
                     #     features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
@@ -536,14 +541,17 @@ if __name__ == "__main__":
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
     # NOTE: uncomment below to evaluate the model under {0, 10, 20, 30, 40, 50, 60, 70, 80, 90}% drops in one go! 
-    tail_len_drops = [3, 6, 10, 13, 16, 19, 22, 26, 28]# NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
-    for drop in tail_len_drops:
-        # final_test_loss, final_test_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
-        final_test_loss, final_test_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=1) # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
-        print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
+    # tail_len_drops = [3, 6, 10, 13, 16, 19, 22, 26, 28]# NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
+    # for drop in tail_len_drops:
+    #     # final_test_loss, final_test_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
+    #     final_test_loss, final_test_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=1) # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
+    #     print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
 
-    # final_test_loss, final_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
-    # # final_test_loss, final_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=5) # consecutive drops
-    # # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
-    # print(f"Final Per-Frame Test Loss for test/evaluation MSE: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim} for tail_len_drops = {args.drops}")
-    # print("'Super Global' Dataset-wide: ", psnr(final_test_loss))
+    start_time = time.time()
+    final_test_loss, final_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
+    end_time = time.time()
+    print(f"Time taken for evaluation: {end_time - start_time:.2f} seconds")
+    # final_test_loss, final_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=5) # consecutive drops
+    # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
+    print(f"Final Per-Frame Test Loss for test/evaluation MSE: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim} for tail_len_drops = {args.drops}")
+    print("'Super Global' Dataset-wide: ", psnr(final_test_loss))
