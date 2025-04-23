@@ -70,7 +70,7 @@ def main():
     lstm_kwargs = json.loads(args.lstm_kwargs) if args.lstm_kwargs else None
     net = load_model(args.model, args.model_path, device, lstm_kwargs)
 
-    output_dir = "receiver_output"
+    output_dir = "./receiver_frames"
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
