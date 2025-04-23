@@ -247,20 +247,20 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
                     total_frames += 1
 
                     ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
-                    frame_latent = ae_model.module.encoder(gt.unsqueeze(0)) if hasattr(ae_model, "module") else ae_model.encode(gt.unsqueeze(0))
-                    if quantize > 0:
-                        features_cpu = frame_latent.squeeze(0).detach().cpu().numpy()
-                        features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
-                        compressed = zlib.compress(features_uint8.tobytes())
-                        latent_num_bytes = len(compressed)
-                        print(f"[Simulated Compression] Frame {b}_{t} compressed size (quantized to uint8): {latent_num_bytes} bytes "
-                            f"(Original shape: {tuple(frame_latent.shape)})")
-                    else:
-                        features_cpu = frame_latent.squeeze(0).detach().cpu().numpy().astype(np.float32)
-                        compressed = zlib.compress(features_cpu.tobytes())
-                        latent_num_bytes = len(compressed)
-                        print(f"[Simulated Compression] Frame {b}_{t} compressed size (float32): {latent_num_bytes} bytes "
-                            f"(Original shape: {tuple(frame_latent.shape)})")
+                    # frame_latent = ae_model.module.encoder(gt.unsqueeze(0)) if hasattr(ae_model, "module") else ae_model.encode(gt.unsqueeze(0))
+                    # if quantize > 0:
+                    #     features_cpu = frame_latent.squeeze(0).detach().cpu().numpy()
+                    #     features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
+                    #     compressed = zlib.compress(features_uint8.tobytes())
+                    #     latent_num_bytes = len(compressed)
+                    #     print(f"[Simulated Compression] Frame {b}_{t} compressed size (quantized to uint8): {latent_num_bytes} bytes "
+                    #         f"(Original shape: {tuple(frame_latent.shape)})")
+                    # else:
+                    #     features_cpu = frame_latent.squeeze(0).detach().cpu().numpy().astype(np.float32)
+                    #     compressed = zlib.compress(features_cpu.tobytes())
+                    #     latent_num_bytes = len(compressed)
+                    #     print(f"[Simulated Compression] Frame {b}_{t} compressed size (float32): {latent_num_bytes} bytes "
+                    #         f"(Original shape: {tuple(frame_latent.shape)})")
                     ##### end intermission function
 
                     if save_sample:
@@ -392,9 +392,9 @@ if __name__ == "__main__":
     # Hyperparameters
     num_epochs = args.epochs
     drops = args.drops
-    batch_size = 16     
+    batch_size = 1     
     learning_rate = 1e-3
-    seq_len = 20        # We want 20-frame subsequences
+    seq_len = 1
     img_height, img_width = 224, 224
     path = "TUCF_sports_action_224x224/"
 
@@ -409,7 +409,7 @@ if __name__ == "__main__":
         img_dir=path,
         seq_len=seq_len,
         transform=transform,
-        step_thru_frames=2
+        step_thru_frames=1
     )
 
     test_prefixes = set(test_img_names)

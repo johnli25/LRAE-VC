@@ -115,7 +115,46 @@ class PNC16(nn.Module):
 
         return y5
     
+class PNC16Encoder(nn.Module): # Conv Encoder
+    def __init__(self):
+        super(PNC16Encoder, self).__init__()
+        
+        # Encoder layers exactly matching PNC16
+        self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (16, 32, 32)
+        self.encoder2 = nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (16, 32, 32)
 
+        # Activation function
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        """Encodes the input image to (16, 32, 32) feature space."""
+        x = self.relu(self.encoder1(x))  # (3, 224, 224) -> (16, 32, 32)
+        x = self.relu(self.encoder2(x))  # (16, 32, 32) -> (16, 32, 32)
+        return x
+
+class PNC16Decoder(nn.Module): # Conv Decoder
+    def __init__(self):
+        super().__init__()
+        # Same conv layers as in PNC16 decode
+        self.decoder1 = nn.ConvTranspose2d(16, 64, kernel_size=9, stride=7, padding=4, output_padding=6)
+        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
+        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
+        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)
+        self.relu = nn.ReLU()
+    
+    def forward(self, x):
+        # x: (batch_size, 16, 32, 32)
+        y1 = self.relu(self.decoder1(x))   # -> (batch_size, 64, 224, 224)
+        y2 = self.relu(self.decoder2(y1))    # -> (batch_size, 64, 224, 224)
+        y2 = y2 + y1
+        y3 = self.relu(self.decoder3(y2))    # -> (batch_size, 64, 224, 224)
+        y4 = self.relu(self.decoder3(y3))    # -> (batch_size, 64, 224, 224)
+        y4 = y4 + y3
+        y5 = self.final_layer(y4)            # -> (batch_size, 3, 224, 224)
+        y5 = torch.clamp(y5, 0, 1)
+        return y5
+    
+    
 class PNC32(nn.Module):
     def __init__(self):
         super(PNC32, self).__init__()
@@ -179,47 +218,6 @@ class PNC32(nn.Module):
         x_clamped = torch.clamp(x, 0, 1)
         x_quantized = torch.round(x_clamped * (levels - 1)) / (levels - 1)
         return x_quantized
-    
-
-
-class PNC16Encoder(nn.Module): # Conv Encoder
-    def __init__(self):
-        super(PNC16Encoder, self).__init__()
-        
-        # Encoder layers exactly matching PNC16
-        self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (16, 32, 32)
-        self.encoder2 = nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (16, 32, 32)
-
-        # Activation function
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        """Encodes the input image to (16, 32, 32) feature space."""
-        x = self.relu(self.encoder1(x))  # (3, 224, 224) -> (16, 32, 32)
-        x = self.relu(self.encoder2(x))  # (16, 32, 32) -> (16, 32, 32)
-        return x
-
-class PNC16Decoder(nn.Module): # Conv Decoder
-    def __init__(self):
-        super().__init__()
-        # Same conv layers as in PNC16 decode
-        self.decoder1 = nn.ConvTranspose2d(16, 64, kernel_size=9, stride=7, padding=4, output_padding=6)
-        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
-        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
-        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)
-        self.relu = nn.ReLU()
-    
-    def forward(self, x):
-        # x: (batch_size, 16, 32, 32)
-        y1 = self.relu(self.decoder1(x))   # -> (batch_size, 64, 224, 224)
-        y2 = self.relu(self.decoder2(y1))    # -> (batch_size, 64, 224, 224)
-        y2 = y2 + y1
-        y3 = self.relu(self.decoder3(y2))    # -> (batch_size, 64, 224, 224)
-        y4 = self.relu(self.decoder3(y3))    # -> (batch_size, 64, 224, 224)
-        y4 = y4 + y3
-        y5 = self.final_layer(y4)            # -> (batch_size, 3, 224, 224)
-        y5 = torch.clamp(y5, 0, 1)
-        return y5
     
 
 class PNC32Encoder(nn.Module):

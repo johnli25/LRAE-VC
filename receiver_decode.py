@@ -38,27 +38,7 @@ def save_img(rgb_tensor, outdir, idx):
     output_path = os.path.join(outdir, f"frame_{idx:04d}.png") 
     plt.imsave(output_path, img_array)
     
-def decode_super_pkt(payload, quant=False):
-    """Version 3"""
-    N = struct.unpack_from("!I", payload, 0)[0] # N = number of features
-    offsets = struct.unpack_from(f"!{N}I", payload, 4)
-    data_start = 4 + 4 * N
-    print("offsets:", offsets)
-    print("data_start:", data_start)
 
-    features = []
-    for i in range(N):
-        start = data_start + offsets[i]
-        end = data_start + offsets[i+1] if i < N-1 else None
-        feature = payload[start:end]
-        feature = zlib.decompress(feature)
-        feature = np.frombuffer(feature, dtype=np.uint8 if quant else np.float32) # if quantized, use uint8 initially and then convert to float32
-        if quant:
-            feature = feature.astype(np.float32) / 255.0
-        features.append(feature.reshape(32, 32))
-
-    latent = np.stack(features, axis=0) # stack 32 feature maps (each 32x32) into a (32, 32, 32) array
-    return np.expand_dims(latent, axis=0) # add batch dimension --> (1, 32, 32, 32)
 
 def decode_feature_packet(pkt, quant):
     """Version 2: Decode a single compressed 32x32 feature map."""
@@ -108,7 +88,7 @@ def main():
     frame_idx = 0
     while True:
         try:
-            pkt, _ = sock.recvfrom(4096)
+            pkt, _ = sock.recvfrom(8192)
             print("len of pkt", len(pkt))
             now = time.time() * 1000.0 # in milliseconds
 
@@ -120,8 +100,9 @@ def main():
             
             pkt_len = struct.unpack_from("!I", pkt, offset)[0]
             data = pkt[offset + 4 : offset + 4 + pkt_len] # 4 bytes for length of data packet
-            feature = zlib.decompress(data)
+            feature = data # zlib.decompress(data)
             feature = np.frombuffer(feature, dtype=np.uint8 if args.quant else np.float32)
+            print("feature shape:", feature.shape)
             if args.quant:
                 feature = feature.astype(np.float32) / 255.0
             features.append(feature.reshape(32, 32))
@@ -159,3 +140,27 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+##### Deprecated ###### 
+@deprecated
+def decode_super_pkt(payload, quant=False):
+    """Version 3"""
+    N = struct.unpack_from("!I", payload, 0)[0] # N = number of features
+    offsets = struct.unpack_from(f"!{N}I", payload, 4)
+    data_start = 4 + 4 * N
+    print("offsets:", offsets)
+    print("data_start:", data_start)
+
+    features = []
+    for i in range(N):
+        start = data_start + offsets[i]
+        end = data_start + offsets[i+1] if i < N-1 else None
+        feature = payload[start:end]
+        feature = zlib.decompress(feature)
+        feature = np.frombuffer(feature, dtype=np.uint8 if quant else np.float32) # if quantized, use uint8 initially and then convert to float32
+        if quant:
+            feature = feature.astype(np.float32) / 255.0
+        features.append(feature.reshape(32, 32))
+
+    latent = np.stack(features, axis=0) # stack 32 feature maps (each 32x32) into a (32, 32, 32) array
+    return np.expand_dims(latent, axis=0) # add batch dimension --> (1, 32, 32, 32)

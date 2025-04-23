@@ -4,6 +4,7 @@ import torch.nn as nn
 from models import PNC32Encoder, PNC32, ConvLSTM_AE
 import json
 import time
+import matplotlib.pyplot as plt
 
 def load_model(model_name, model_path, device, lstm_kwargs=None):
     """
@@ -50,8 +51,12 @@ def load_model(model_name, model_path, device, lstm_kwargs=None):
 
 def preprocess_frame(frame, device):
     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) # Convert BGR to RGB
-    img = cv2.resize(img, (224, 224))
+    # img = cv2.resize(img, (224, 224))
     img = img.astype(np.float32) / 255.0 # normalize to [0, 1]
+    # plt.imshow(img)
+    # plt.title("Original Frame")
+    # plt.axis("off")  # Optional: Turn off axis labels
+    # plt.imsave("frame.png", img)  # Save the original frame as an image
 
     t = torch.from_numpy(img) # convert to tensor
     t = t.permute(2, 0, 1) # NOTE: rearrange dimensions from (H, W, C) to (C, H, W)
@@ -59,17 +64,50 @@ def preprocess_frame(frame, device):
     t = t.to(device)
     return t
 
-def encode_and_send(net, sock, frame, device, quantize, address, video_name):
+
+def save_img(rgb_tensor, outdir, idx):
+    if not os.path.exists(outdir):
+        os.makedirs(outdir)
+    squeezed_tensor = rgb_tensor.squeeze(0) # Remove the batch dimension (squeeze the first dimension)
+    permuted_tensor = squeezed_tensor.permute(1, 2, 0) # Rearrange the tensor dimensions from (C, H, W) to (H, W, C) for image representation
+    img_array = permuted_tensor.cpu().numpy() # Move the tensor to the CPU and convert it to a NumPy array
+    img_array = img_array.clip(0, 1) # Scale pixel values to [0, 1] 
+    output_path = os.path.join(outdir, f"frame_{idx:04d}.png") 
+    plt.imsave(output_path, img_array)
+
+
+def encode_and_send(net, sock, frame, device, quantize, address, video_name, frame_idx):
     """
     Encodes and compresses one frame into latent features, optionally quantizes
     then sends with a 4-byte big-endian length prefix.
     """
     x = preprocess_frame(frame, device)
+
     with torch.no_grad():
         if hasattr(net, "encoder"): 
             z = net.encoder(x) # e.g. conv_lstm_PNC32_ae.encoder(x)
+            ## NOTE: optional sanity check! Save the original frame as an image
+            z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
+            with torch.no_grad():
+                lstm_out = net.conv_lstm(z_seq)
+
+                if net.project_lstm_to_latent is not None:
+                    print("Projecting LSTM output to latent space")
+                    hc = 2 * net.hidden_channels if net.bidirectional else net.hidden_channels
+                    lat = net.project_lstm_to_latent(lstm_out.view(-1, hc, 32, 32))
+                    lat = lat.view(1, 1, net.total_channels, 32, 32)
+                else:
+                    lat = lstm_out
+
+                recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
+                save_img(recon, "sender_frames/", frame_idx)
+            
         else: 
             z = net.encode(x) # PNC32
+
+            ## NOTE: optional sanity check! Save the original frame as an image
+            recon = net.decode(z) # reconstruction
+            save_img(recon, "sender_frames/", frame_idx) # Save the original frame as an image
 
         arr = z.cpu().numpy().astype(np.float32) # convert to numpy array
 
@@ -84,8 +122,8 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name):
     start_time = time.time()
     capture_ts = struct.pack("!I", capture_ts & 0xFFFFFFFF) # ensures 4-byte length
 
-    first_feat = arr[0, 0].tobytes()
-    first_body = zlib.compress(first_feat)
+    first_feature = arr[0, 0].tobytes()
+    first_body = first_feature # zlib.compress(first_feature)
     first_pkt  = capture_ts + struct.pack("!I", len(first_body)) + first_body
     print(len(first_pkt), len(first_pkt))
     sock.sendto(first_pkt, address)
@@ -158,6 +196,7 @@ def main():
     }
 
     try:
+        frame_idx = 0
         for video_name, cap in iter_videos(args.input):
             if video_name.split(".")[0] not in test_videos:
                 # print(f"[sender] Skipping video: {video_name}")
@@ -167,8 +206,9 @@ def main():
                 ret, frame = cap.read()
                 if not ret:
                     break
-                info = encode_and_send(net, sock, frame, device, args.quant, dest, video_name)
+                info = encode_and_send(net, sock, frame, device, args.quant, dest, video_name, frame_idx)
                 # print(f"[sender] Sent frame {info['video_name']} with compressed size {info['compressed_size']} bytes")
+                frame_idx += 1
             cap.release()
     finally:
         sock.close()
