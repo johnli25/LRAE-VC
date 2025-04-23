@@ -213,7 +213,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
     ae_model.eval()
     total_mse, total_psnr, total_ssim, total_frames = 0.0, 0.0, 0.0, 0
 
-    output_dir = "ae_lstm_output_test" if save_sample == "test" else "ae_lstm_output_val"
+    output_dir = "ae_lstm_output_test"
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
@@ -247,20 +247,20 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
                     total_frames += 1
 
                     ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
-                    # frame_latent = ae_model.module.encode(gt.unsqueeze(0)) if hasattr(ae_model, "module") else ae_model.encode(gt.unsqueeze(0))
-                    # if quantize > 0:
-                    #     features_cpu = frame_latent.squeeze(0).detach().cpu().numpy()
-                    #     features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
-                    #     compressed = zlib.compress(features_uint8.tobytes())
-                    #     latent_num_bytes = len(compressed)
-                    #     print(f"[Simulated Compression] Frame {b}_{t} compressed size (quantized to uint8): {latent_num_bytes} bytes "
-                    #         f"(Original shape: {tuple(frame_latent.shape)})")
-                    # else:
-                    #     features_cpu = frame_latent.squeeze(0).detach().cpu().numpy().astype(np.float32)
-                    #     compressed = zlib.compress(features_cpu.tobytes())
-                    #     latent_num_bytes = len(compressed)
-                    #     print(f"[Simulated Compression] Frame {b}_{t} compressed size (float32): {latent_num_bytes} bytes "
-                    #         f"(Original shape: {tuple(frame_latent.shape)})")
+                    frame_latent = ae_model.module.encoder(gt.unsqueeze(0)) if hasattr(ae_model, "module") else ae_model.encode(gt.unsqueeze(0))
+                    if quantize > 0:
+                        features_cpu = frame_latent.squeeze(0).detach().cpu().numpy()
+                        features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
+                        compressed = zlib.compress(features_uint8.tobytes())
+                        latent_num_bytes = len(compressed)
+                        print(f"[Simulated Compression] Frame {b}_{t} compressed size (quantized to uint8): {latent_num_bytes} bytes "
+                            f"(Original shape: {tuple(frame_latent.shape)})")
+                    else:
+                        features_cpu = frame_latent.squeeze(0).detach().cpu().numpy().astype(np.float32)
+                        compressed = zlib.compress(features_cpu.tobytes())
+                        latent_num_bytes = len(compressed)
+                        print(f"[Simulated Compression] Frame {b}_{t} compressed size (float32): {latent_num_bytes} bytes "
+                            f"(Original shape: {tuple(frame_latent.shape)})")
                     ##### end intermission function
 
                     if save_sample:

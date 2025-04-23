@@ -23,7 +23,7 @@ def load_model(model_name, model_path, device, lstm_kwargs=None):
             checkpoint = {k.replace("module.", "", 1): v for k, v in checkpoint.items()}
 
         if model_name == "pnc32":
-            model = PNC32Encoder()
+            model = PNC32()
         elif model_name == "conv_lstm_PNC32_ae":
             if lstm_kwargs is None:
                 raise ValueError("Must pass --lstm_kwargs for ConvLSTM_AE state_dict")
@@ -31,7 +31,18 @@ def load_model(model_name, model_path, device, lstm_kwargs=None):
         else:
             raise ValueError(f"Unknown model_name: {model_name}")
         
-        model.load_state_dict(checkpoint)
+        # Filter out unexpected keys
+        model_state_dict = model.state_dict()
+        filtered_checkpoint = {k: v for k, v in checkpoint.items() if k in model_state_dict}
+        missing_keys = [k for k in model_state_dict.keys() if k not in checkpoint]
+        unexpected_keys = [k for k in checkpoint.keys() if k not in model_state_dict]
+
+        if missing_keys:
+            print(f"Warning: Missing keys in checkpoint: {missing_keys}")
+        if unexpected_keys:
+            print(f"Warning: Ignoring unexpected keys in checkpoint: {unexpected_keys}")
+        
+        model.load_state_dict(filtered_checkpoint)
     else:
         raise RuntimeError(f"Unrecognized checkpoint type: {type(checkpoint)}")
     return model.to(device).eval()
@@ -55,41 +66,41 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name):
     """
     x = preprocess_frame(frame, device)
     with torch.no_grad():
-        if hasattr(net, "encoder"): z = net.encoder(x) # conv_lstm_ae.encoder(x)
-        else: z = net(x) # PNC32Encoder
+        if hasattr(net, "encoder"): 
+            z = net.encoder(x) # e.g. conv_lstm_PNC32_ae.encoder(x)
+        else: 
+            z = net.encode(x) # PNC32
 
         arr = z.cpu().numpy().astype(np.float32) # convert to numpy array
 
     # optional 8-bit quantization
     if quantize:
         arr = np.clip((arr * 255).round(), 0, 255).astype(np.uint8)
-    
-    payload = arr.tobytes()
-    compressed_payload = zlib.compress(payload)
-    packet = struct.pack("!I", len(compressed_payload)) + compressed_payload
-
-    # Version 1: send whole frame (features) at once
-    start_time = time.time()
-    sock.sendto(packet, address)
-    end_time = time.time()
-    print(f"[sender] Sent packet of size {len(packet)} bytes in {end_time - start_time} seconds")
 
     # Version 2: send each feature separately
-    total_features = arr.shape[1]  # arr shape is (1, 32, 32, 32) for PNC32
-    print("Total features:", arr.shape) 
-    start_time = time.time()
-    for i in range(total_features):
-        feature = arr[0, i]  # Extract the i-th feature
-        payload = feature.tobytes()
+    total_features = arr.shape[1]  # NOTE: arr.shape is (1, 32, 32, 32) for PNC32
 
-        compressed_payload = zlib.compress(payload)
-        print(f"[sender] Compressed feature {i} size: {len(compressed_payload)} bytes")
+    capture_ts = int(time.time() * 1000.0) # capture_ts in milliseconds
+    start_time = time.time()
+    capture_ts = struct.pack("!I", capture_ts & 0xFFFFFFFF) # ensures 4-byte length
+
+    first_feat = arr[0, 0].tobytes()
+    first_body = zlib.compress(first_feat)
+    first_pkt  = capture_ts + struct.pack("!I", len(first_body)) + first_body
+    print(len(first_pkt), len(first_pkt))
+    sock.sendto(first_pkt, address)
+
+    for i in range(1, total_features):
+        feature = arr[0, i]  # Extract the i-th feature
+
+        compressed_payload = zlib.compress(feature.tobytes())
+        # print(f"[sender] Compressed feature {i} size: {len(compressed_payload)} bytes")
 
         packet = struct.pack("!I", len(compressed_payload)) + compressed_payload
-
+        # print(len(packet), len(compressed_payload)) 
         sock.sendto(packet, address)
     end_time = time.time()
-    print(f"[sender] Version 2 by feature: Sent packet of size {len(packet)} bytes in {end_time - start_time} seconds")
+    print(f"Version 2 [sender]: Sent {total_features} features in {end_time - start_time:.6f} seconds")
 
     # NOTE: return purely for bookkeeping purposes: 
     return {
@@ -119,13 +130,12 @@ def main():
     parser.add_argument("--model_path",  required=True,
                         help=".pth file (full model or state_dict)")
     parser.add_argument("--lstm_kwargs", type=str, default=None,
-                        help="JSON dict for ConvLSTM_AE ctor if loading state_dict")
-    parser.add_argument("--input",       required=True,
-                        help="video file or directory of videos")
+                        help="JSON dict for ConvLSTM_AE constructor if loading state_dict")
+    parser.add_argument("--input",       required=True, help="video file or directory of videos")
     parser.add_argument("--ip",          required=True, help="receiver IP")
     parser.add_argument("--port",        type=int, required=True, help="receiver port")
     # parser.add_argument("--quant", type=bool, default=False, help="enable or disable 8-bit quantization (default: False)")
-    parser.add_argument("--quant", action="store_true", help="enable 8-bit quantization (default: False)")
+    parser.add_argument("--quant", action="store_true", help="enable integer-bit quantization (default: False)")
 
     args = parser.parse_args()
 
@@ -146,22 +156,64 @@ def main():
         # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
         # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
     }
+
     try:
         for video_name, cap in iter_videos(args.input):
-                if video_name.split(".")[0] not in test_videos:
-                    # print(f"[sender] Skipping video: {video_name}")
-                    continue
-                print(f"[sender] Processing video: {video_name}")
-                while True:
-                    ret, frame = cap.read()
-                    if not ret:
-                        break
-                    info = encode_and_send(net, sock, frame, device, args.quant, dest, video_name)
-                    # print(f"[sender] Sent frame {info['video_name']} with compressed size {info['compressed_size']} bytes")
-                cap.release()
+            if video_name.split(".")[0] not in test_videos:
+                # print(f"[sender] Skipping video: {video_name}")
+                continue
+            print(f"[sender] Processing video: {video_name}")
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                info = encode_and_send(net, sock, frame, device, args.quant, dest, video_name)
+                # print(f"[sender] Sent frame {info['video_name']} with compressed size {info['compressed_size']} bytes")
+            cap.release()
     finally:
         sock.close()
         print("[sender] Done. Socket closed.")
 
 if __name__ == "__main__":
     main()
+
+
+
+##### Deprecated stuff #####
+# Version 1: Send whole frame (features) at once
+if False:  # Deprecated code block
+    # Version 1: Send whole frame (features) at once
+    start_time = time.time()
+    compressed_payload = zlib.compress(arr.tobytes())
+    packet = struct.pack("!I", len(compressed_payload)) + compressed_payload
+
+    sock.sendto(packet, address)
+    end_time = time.time()
+    print(f"Version 1 [sender]: Sent {len(arr)} features in {end_time - start_time:.6f} seconds")
+
+
+# Version 3: send whole frame (features) but with offsets between features 
+if False:
+    offsets = []
+    cursor = 0
+    payload_chunks = []
+
+    start_time = time.time()
+    for i in range(total_features):
+        feature = arr[0, i]
+        compressed_payload = zlib.compress(feature.tobytes())
+        # print(f"[sender] Compressed feature {i} size: {len(compressed_payload)} bytes")
+
+        offsets.append(cursor)
+        payload_chunks.append(compressed_payload)
+        cursor += len(compressed_payload)
+
+    header = struct.pack("!I", len(offsets)) # num features (4 B) e.g. = 32 features 
+    header += b"".join(struct.pack("!I", offset) for offset in offsets) # e.g. 4 (total length) + 32 x 4 = 132 B
+    body = b"".join(payload_chunks) 
+    packet = struct.pack("!I", len(header) + len(body)) + header + body
+    # print("packet is of length: ", len(packet))
+    sock.sendto(packet, address)  
+
+    end_time = time.time()
+    print(f"[Version 3: sender] Sent {len(offsets)} features in {end_time - start_time:.6f} seconds")
