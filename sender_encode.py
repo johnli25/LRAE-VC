@@ -86,6 +86,7 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
     with torch.no_grad():
         if hasattr(net, "encoder"): 
             z = net.encoder(x) # e.g. conv_lstm_PNC32_ae.encoder(x)
+            
             ## NOTE: optional sanity check! Save the original frame as an image
             z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
             with torch.no_grad():
@@ -118,28 +119,40 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
     # Version 2: send each feature separately
     total_features = arr.shape[1]  # NOTE: arr.shape is (1, 32, 32, 32) for PNC32
 
-    capture_ts = int(time.time() * 1000.0) # capture_ts in milliseconds
-    start_time = time.time()
-    capture_ts = struct.pack("!I", capture_ts & 0xFFFFFFFF) # ensures 4-byte length
+    t0 = time.monotonic_ns()
+    header = struct.pack("!Q", t0)       # 8 bytes
 
-    first_feature = arr[0, 0].tobytes()
-    first_body = first_feature # zlib.compress(first_feature)
-    first_pkt  = capture_ts + struct.pack("!I", len(first_body)) + first_body
-    print(len(first_pkt), len(first_pkt))
+    first_feature = arr[0, 0].tobytes()   # e.g. 1024 floats --> 4096 bytes
+    first_body  = first_feature
+    first_pkt = header + struct.pack("!I", len(first_body)) + first_body
+
+    print(f"Sending first pkt: {len(first_pkt)} bytes (8B ts + 4B len + {len(first_body)}B payload)")
     sock.sendto(first_pkt, address)
 
     for i in range(1, total_features):
         feature = arr[0, i]  # Extract the i-th feature
+        print("feature shape:", feature.shape)
 
-        compressed_payload = zlib.compress(feature.tobytes())
-        # print(f"[sender] Compressed feature {i} size: {len(compressed_payload)} bytes")
+        compressed_payload = feature.tobytes() # zlib.compress(feature.tobytes())
 
         packet = struct.pack("!I", len(compressed_payload)) + compressed_payload
-        # print(len(packet), len(compressed_payload)) 
+        print("len of packet:", len(packet))
         sock.sendto(packet, address)
-    end_time = time.time()
-    print(f"Version 2 [sender]: Sent {total_features} features in {end_time - start_time:.6f} seconds")
+    # for i in range(total_features):
+    #     # arr[0, i] is only a view – make it contiguous first
+    #     feature_arr = np.ascontiguousarray(arr[0, i], dtype=np.float32)
+    #     feature_bytes = feature_arr.tobytes()
 
+    #     assert len(feature_bytes) == 32 * 32 * 4, "not 4096 bytes!"
+    #     print("len of feature_bytes:", len(feature_bytes))
+
+    #     pkt = struct.pack("!I", len(feature_bytes)) + feature_bytes
+    #     sock.sendto(pkt, address)
+
+    # end_time = time.time()
+    # print(f"Version 2 [sender]: Sent {total_features} features in {end_time - start_time:.6f} seconds")
+
+    compressed_payload = []
     # NOTE: return purely for bookkeeping purposes: 
     return {
         "video_name": video_name,

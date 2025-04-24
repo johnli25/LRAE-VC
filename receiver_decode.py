@@ -7,26 +7,46 @@ import time
 import matplotlib.pyplot as plt
 import shutil
 
-def load_model(kind, path, device, lstm_kwargs=None):
-    ckpt = torch.load(path, map_location=device)
+def load_model(model_name, model_path, device, lstm_kwargs=None):
+    """
+    model_name: "pnc32" or "conv_lstm_PNC32_ae"
+    model_path: .pth file, either a full-saved model or a state_dict
+    lstm_kwargs: dict with keys (total_channels, hidden_channels, ae_model_name, bidirectional)
+                 required only when model_name=="conv_lstm_PNC32_ae" and you saved state_dict
+    """
+    checkpoint = torch.load(model_path, map_location=device)
+    
+    if isinstance(checkpoint, nn.Module): # If you saved the full model object:
+        print("LOADING FULL MODEL OBJECT")
+        model = checkpoint
 
-    if isinstance(ckpt, nn.Module):
-        model = ckpt
-    else:
-        # strip "module." for DataParallel checkpoints
-        if any(k.startswith("module.") for k in ckpt):
-            ckpt = {k.replace("module.", "", 1): v for k, v in ckpt.items()}
+    elif isinstance(checkpoint, dict): # Otherwise assume it's a state_dict
+        if any(k.startswith("module.") for k in checkpoint.keys()):
+            checkpoint = {k.replace("module.", "", 1): v for k, v in checkpoint.items()}
 
-        if kind == "pnc32":
-            model = PNC32Encoder()          # only encoder – fine; we won't reconstruct
-        elif kind == "conv_lstm_PNC32_ae":
+        if model_name == "pnc32":
+            model = PNC32()
+        elif model_name == "conv_lstm_PNC32_ae":
             if lstm_kwargs is None:
-                raise ValueError("--lstm_kwargs missing")
+                raise ValueError("Must pass --lstm_kwargs for ConvLSTM_AE state_dict")
             model = ConvLSTM_AE(**lstm_kwargs)
         else:
-            raise ValueError("unknown model kind")
-        model.load_state_dict(ckpt)
+            raise ValueError(f"Unknown model_name: {model_name}")
+        
+        # Filter out unexpected keys
+        model_state_dict = model.state_dict()
+        filtered_checkpoint = {k: v for k, v in checkpoint.items() if k in model_state_dict}
+        missing_keys = [k for k in model_state_dict.keys() if k not in checkpoint]
+        unexpected_keys = [k for k in checkpoint.keys() if k not in model_state_dict]
 
+        if missing_keys:
+            print(f"Warning: Missing keys in checkpoint: {missing_keys}")
+        if unexpected_keys:
+            print(f"Warning: Ignoring unexpected keys in checkpoint: {unexpected_keys}")
+        
+        model.load_state_dict(filtered_checkpoint)
+    else:
+        raise RuntimeError(f"Unrecognized checkpoint type: {type(checkpoint)}")
     return model.to(device).eval()
 
 
@@ -38,17 +58,6 @@ def save_img(rgb_tensor, outdir, idx):
     output_path = os.path.join(outdir, f"frame_{idx:04d}.png") 
     plt.imsave(output_path, img_array)
     
-
-
-def decode_feature_packet(pkt, quant):
-    """Version 2: Decode a single compressed 32x32 feature map."""
-    pkt_len = struct.unpack_from("!I", pkt, 0)[0]
-    raw = zlib.decompress(pkt[4:])
-    arr = np.frombuffer(raw, dtype=np.uint8 if quant else np.float32)
-    if quant:
-        arr = arr.astype(np.float32) / 255.0
-    return arr.reshape(32, 32)
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -89,26 +98,33 @@ def main():
     while True:
         try:
             pkt, _ = sock.recvfrom(8192)
-            print("len of pkt", len(pkt))
-            now = time.time() * 1000.0 # in milliseconds
-
-            if frame_timestamp is None:  # first packet of frame
-                frame_timestamp  = struct.unpack_from("!I", pkt, 0)[0] # ms from sender
-                offset = 4 # skip timestamp
+            print("length of pkt", len(pkt))
+            if frame_timestamp is None:
+                # unpack an unsigned 64‐bit timestamp from bytes 0–7
+                t0_ns = struct.unpack_from("!Q", pkt, 0)[0]
+                # frame_timestamp = t0_ns / 1000000.0   # convert to ms
+                frame_timestamp = time.monotonic_ns() / 1000000.0 
+                offset = 8  # skip the full 8‐byte header
             else:
-                offset = 0 # no timestamp
+                offset = 0
+            now = time.monotonic_ns() / 1000000.0 # convert to ms
             
-            pkt_len = struct.unpack_from("!I", pkt, offset)[0]
-            data = pkt[offset + 4 : offset + 4 + pkt_len] # 4 bytes for length of data packet
+            data_len = struct.unpack_from("!I", pkt, offset)[0]
+            print("data_len:", data_len)
+            data = pkt[offset + 4 : offset + 4 + data_len] # 4 bytes for length of data packet
             feature = data # zlib.decompress(data)
             feature = np.frombuffer(feature, dtype=np.uint8 if args.quant else np.float32)
             print("feature shape:", feature.shape)
             if args.quant:
                 feature = feature.astype(np.float32) / 255.0
             features.append(feature.reshape(32, 32))
-
+            print(len(features), "features received")
+            print("now - frame_timestamp:", now - frame_timestamp)
+            print("now: ", now)
+            print("frame_timestamp: ", frame_timestamp)
             if len(features) == 32 or (now - frame_timestamp > args.deadline_ms): # NOTE: args.deadline_ms does NOT include the time to decode + display!
                 if len(features) < 32:
+                    print("not enough features, padding with zeros")
                     features += [np.zeros((32, 32), dtype=np.float32)] * (32 - len(features))
                 latent = np.stack(features)[None, ...] # NOTE: stack 32 feature maps (each 32x32) into a (32, 32, 32) array and [None, ...] adds batch dimension --> (1, 32, 32, 32)
                 z = torch.from_numpy(latent).to(device) # convert to tensor and move to GPU

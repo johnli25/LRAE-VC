@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 python receiver_decode.py \
-  --model        conv_lstm_PNC32_ae \
-  --model_path   conv_lstm_PNC32_ae_dropUpTo_32_final_pristine.pth \
+  --model        pnc32 \
+  --model_path   PNC32_final_w_taildrops.pth \
   --ip      127.0.0.1 \
   --port    9000 \
-  --lstm_kwargs  '{"total_channels":32,"hidden_channels":32,"ae_model_name":"PNC32","bidirectional":false}' \
   --deadline_ms 100 \
+  # --lstm_kwargs  '{"total_channels":32,"hidden_channels":32,"ae_model_name":"PNC32","bidirectional":false}' \
   # --quant False
 
 
