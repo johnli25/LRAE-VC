@@ -6,6 +6,7 @@ import json
 import time
 import matplotlib.pyplot as plt
 import shutil
+from collections import defaultdict
 
 def load_model(model_name, model_path, device, lstm_kwargs=None):
     """
@@ -96,36 +97,40 @@ def main():
     deadline_sec = args.deadline_ms / 1000.0 # convert b/c Python's time is in seconds
 
     ##### Version 2: receive each feature separately #####
-    features = []
+    features_dict = defaultdict(lambda: [np.zeros((32, 32)) for _ in range(32)])    
     frame_timestamp = None
-    frame_idx = 0
+    deadline_ms = args.deadline_ms  
+    cur_frame = 0
+    TOTAL_FEATURES = 32
+    current_features_received = 0
+
     while True:
         try:
-            pkt, _ = sock.recvfrom(8192)
-            # print("length of pkt", len(pkt))
-            if frame_timestamp is None:
-                frame_timestamp = time.monotonic_ns() / 1e6
-            now = time.monotonic_ns() / 1e6 # convert ns to ms
-
+            pkt, _ = sock.recvfrom(4096)
             frame_idx, feature_num, data_len = struct.unpack_from("!III", pkt, 0)
+            if frame_timestamp is None:
+                frame_timestamp = time.monotonic_ns() / 1e6 # convert to milliseconds
+            if cur_frame != frame_idx:  # IMPORTANT NOTE: if frame_idx is not the expected one, skip. This also drops frames that are 1) out of order or 2) arrived past the deadline! 
+                continue
+
             data = pkt[12 : 12 + data_len]  # Extract the payload starting after the header
             # print(f"Received pkt for frame_idx: {frame_idx}, feature_num: {feature_num}, data_len: {data_len}")
-
             feature = zlib.decompress(data)
             feature = np.frombuffer(feature, dtype=np.uint8 if args.quant else np.float32)
             if args.quant:
                 feature = feature.astype(np.float32) / 255.0
-            features.append(feature.reshape(32, 32))
-            # print(len(features), "features received")
-            if len(features) == 32 or (now - frame_timestamp > args.deadline_ms): # NOTE: args.deadline_ms does NOT include the time to decode + display!
+            feature = feature.reshape(32, 32) # Reshape to 
+            features_dict[frame_idx][feature_num] = feature # NOTE: this is a list of 32 features, each 32x32
+            current_features_received += 1
+            # print(len(features_dict[frame_idx]), "features received")
+
+            now = time.monotonic_ns() / 1e6 # convert to milliseconds
+            if current_features_received == TOTAL_FEATURES or (now - frame_timestamp > args.deadline_ms): # NOTE: args.deadline_ms does NOT include the time to decode + display!
                 print("now - frame_timestamp:", now - frame_timestamp)
-                start_time = time.monotonic() * 1000
-                print(f"[receiver] Frame {frame_idx} received {len(features)} features")
-                if len(features) < 32:
-                    print("not enough features, padding with zeros")
-                    features += [np.zeros((32, 32), dtype=np.float32)] * (32 - len(features))
-                latent = np.stack(features)[None, ...] # NOTE: stack 32 feature maps (each 32x32) into a (32, 32, 32) array and [None, ...] adds batch dimension --> (1, 32, 32, 32)
-                z = torch.from_numpy(latent).to(device) # convert to tensor and move to GPU
+                start_decode_time = time.monotonic() * 1000
+                print(f"[receiver] Frame {frame_idx} received {current_features_received} features")
+                latent = np.stack(features_dict[frame_idx])[None, ...] # NOTE: stack 32 feature maps (each 32x32) into a (32, 32, 32) array and [None, ...] adds batch dimension --> (1, 32, 32, 32)
+                z = torch.from_numpy(latent).to(device).float() # Convert to float PyTorch tensor and move to device
 
                 with torch.no_grad():
                     if hasattr(net, "decoder"):
@@ -143,25 +148,27 @@ def main():
                         recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
                     else: 
                         recon = net.decode(z)
-                end_time = time.monotonic() * 1000
-                print("Time to decode + display:", end_time - start_time)
+                end_decode_time = time.monotonic() * 1000
+                print("Time to decode:", end_decode_time - start_decode_time)
 
                 save_img(recon, output_dir, frame_idx)
-                frame_idx += 1
-                features.clear()
+                cur_frame = frame_idx + 1
                 frame_timestamp = None
+                current_features_received = 0
+
 
         except socket.timeout:
-            if frame_timestamp and features:
-                if len(features) < 32:
-                    features += [np.zeros((32, 32), dtype=np.float32)] * (32 - len(features))
-                latent = np.stack(features)[None, ...]
-                z = torch.from_numpy(latent).to(device)
+            if frame_timestamp and current_features_received > 0:
+                print(f"[receiver:timeout] Frame {cur_frame} timed out with {current_features_received} features")
+                features = features_dict[cur_frame]
+
+                # Stack features into latent tensor
+                latent = np.stack(features)[None, ...]  # shape: (1, 32, 32, 32)
+                z = torch.from_numpy(latent).to(device).float()
 
                 with torch.no_grad():
                     if hasattr(net, "decoder"):
                         z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
-                        print("z seq", z_seq.shape)
                         lstm_out = net.conv_lstm(z_seq)
 
                         if net.project_lstm_to_latent is not None:
@@ -172,15 +179,15 @@ def main():
                         else:
                             lat = lstm_out
 
-                        recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
-                    else: 
+                        recon = net.decoder(lat[:, 0])
+                    else:
                         recon = net.decode(z)
 
-                save_img(recon, output_dir, frame_idx)
-                print(f"[receiver:v2] Frame {frame_idx} (timeout with {len(features)} features)")
-                frame_idx += 1
-                features.clear()
+                save_img(recon, output_dir, cur_frame)
+                cur_frame += 1
                 frame_timestamp = None
+                current_features_received = 0
+
 
 if __name__ == "__main__":
     main()

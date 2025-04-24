@@ -81,6 +81,7 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
     Encodes and compresses one frame into latent features, optionally quantizes
     then sends with a 4-byte big-endian length prefix.
     """
+    start_time = time.monotonic_ns() / 1e6  
     x = preprocess_frame(frame, device)
 
     with torch.no_grad():
@@ -88,26 +89,26 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
             z = net.encoder(x) # e.g. conv_lstm_PNC32_ae.encoder(x)
             
             ## NOTE: optional sanity check! Save the original frame as an image
-            z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
-            lstm_out = net.conv_lstm(z_seq)
+            # z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
+            # lstm_out = net.conv_lstm(z_seq)
 
-            if net.project_lstm_to_latent is not None:
-                print("Projecting LSTM output to latent space")
-                hc = 2 * net.hidden_channels if net.bidirectional else net.hidden_channels
-                lat = net.project_lstm_to_latent(lstm_out.view(-1, hc, 32, 32))
-                lat = lat.view(1, 1, net.total_channels, 32, 32)
-            else:
-                lat = lstm_out
+            # if net.project_lstm_to_latent is not None:
+            #     print("Projecting LSTM output to latent space")
+            #     hc = 2 * net.hidden_channels if net.bidirectional else net.hidden_channels
+            #     lat = net.project_lstm_to_latent(lstm_out.view(-1, hc, 32, 32))
+            #     lat = lat.view(1, 1, net.total_channels, 32, 32)
+            # else:
+            #     lat = lstm_out
 
-            recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
-            save_img(recon, "sender_frames/", frame_idx)
+            # recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
+            # save_img(recon, "sender_frames/", frame_idx)
             
         else: 
             z = net.encode(x) # PNC32
 
             ## NOTE: optional sanity check! Save the original frame as an image
-            recon = net.decode(z) # reconstruction
-            save_img(recon, "sender_frames/", frame_idx) # Save the original frame as an image
+            # recon = net.decode(z) # reconstruction
+            # save_img(recon, "sender_frames/", frame_idx) # Save the original frame as an image
 
         arr = z.cpu().numpy().astype(np.float32) # convert to numpy array
 
@@ -118,7 +119,6 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
     # Version 2: send each feature separately
     total_features = arr.shape[1]  # NOTE: arr.shape is (1, 32, 32, 32) for PNC32
 
-    print("frame_idx: ", frame_idx)
     for i in range(total_features):
         feature = arr[0, i]  # Extract the i-th feature
         compressed_payload = zlib.compress(feature.tobytes())
@@ -127,7 +127,9 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
         sock.sendto(packet, address)
         # time.sleep(0.001) # 1ms delay between packets
 
-    compressed_payload = []
+    end_time = time.monotonic_ns() / 1e6
+    print(f"[sender] Encoded and Sent {total_features} features in {end_time - start_time:.6f} ms for frame {frame_idx} of video {video_name}")
+
     # NOTE: return purely for bookkeeping purposes: 
     return {
         "video_name": video_name,
@@ -171,6 +173,15 @@ def main():
     lstm_kwargs = json.loads(args.lstm_kwargs) if args.lstm_kwargs else None
     net = load_model(args.model, args.model_path, device, lstm_kwargs)
 
+    print("[sender] Running warm-up pass to help reduce latency significantly on first frame.")
+    dummy = torch.randn(1, 3, 224, 224).to(device)
+    with torch.no_grad():
+        if hasattr(net, "encoder"):
+            _ = net.encoder(dummy)
+        else:
+            _ = net.encode(dummy)
+    print("[sender] Warm-up complete.")
+
     # Create a UDP socket (no need to connect)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     dest = (args.ip, args.port)
@@ -194,8 +205,7 @@ def main():
                 ret, frame = cap.read()
                 if not ret:
                     break
-                info = encode_and_send(net, sock, frame, device, args.quant, dest, video_name, frame_idx)
-                # print(f"[sender] Sent frame {info['video_name']} with compressed size {info['compressed_size']} bytes")
+                _ = encode_and_send(net, sock, frame, device, args.quant, dest, video_name, frame_idx)
                 frame_idx += 1
             cap.release()
     finally:
@@ -204,44 +214,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-##### Deprecated stuff #####
-# Version 1: Send whole frame (features) at once
-if False:  # Deprecated code block
-    # Version 1: Send whole frame (features) at once
-    start_time = time.time()
-    compressed_payload = zlib.compress(arr.tobytes())
-    packet = struct.pack("!I", len(compressed_payload)) + compressed_payload
-
-    sock.sendto(packet, address)
-    end_time = time.time()
-    print(f"Version 1 [sender]: Sent {len(arr)} features in {end_time - start_time:.6f} seconds")
-
-
-# Version 3: send whole frame (features) but with offsets between features 
-if False:
-    offsets = []
-    cursor = 0
-    payload_chunks = []
-
-    start_time = time.time()
-    for i in range(total_features):
-        feature = arr[0, i]
-        compressed_payload = zlib.compress(feature.tobytes())
-        # print(f"[sender] Compressed feature {i} size: {len(compressed_payload)} bytes")
-
-        offsets.append(cursor)
-        payload_chunks.append(compressed_payload)
-        cursor += len(compressed_payload)
-
-    header = struct.pack("!I", len(offsets)) # num features (4 B) e.g. = 32 features 
-    header += b"".join(struct.pack("!I", offset) for offset in offsets) # e.g. 4 (total length) + 32 x 4 = 132 B
-    body = b"".join(payload_chunks) 
-    packet = struct.pack("!I", len(header) + len(body)) + header + body
-    # print("packet is of length: ", len(packet))
-    sock.sendto(packet, address)  
-
-    end_time = time.time()
-    print(f"[Version 3: sender] Sent {len(offsets)} features in {end_time - start_time:.6f} seconds")

@@ -5,7 +5,7 @@ python sender_encode.py \
   --input        ./TUCF_sports_action_224x224_mp4_vids \
   --ip      127.0.0.1 \
   --port    9000 \
-  --lstm_kwargs  '{"total_channels":32,"hidden_channels":32,"ae_model_name":"PNC32","bidirectional":false}' \
+  # --lstm_kwargs  '{"total_channels":32,"hidden_channels":32,"ae_model_name":"PNC32","bidirectional":false}' \
   # --quant False
 
 
