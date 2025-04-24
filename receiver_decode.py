@@ -85,7 +85,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2**21)  # 2MB receive buffer
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 * 2**21)  # 2MB receive buffer
     recv_buf = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
     print(f"Receive buffer size: {recv_buf} bytes")
 
@@ -117,11 +117,8 @@ def main():
                 feature = feature.astype(np.float32) / 255.0
             features.append(feature.reshape(32, 32))
             # print(len(features), "features received")
-            # print("now - frame_timestamp:", now - frame_timestamp)
-            if frame_idx in {1,2,3,4,5,6,7}:
-                print(f"frame_idx: {frame_idx}, feature_num: {feature_num}, data_len: {data_len}, len(features): {len(features)}")
-                print("now - frame_timestamp:", now - frame_timestamp)
             if len(features) == 32 or (now - frame_timestamp > args.deadline_ms): # NOTE: args.deadline_ms does NOT include the time to decode + display!
+                print("now - frame_timestamp:", now - frame_timestamp)
                 if len(features) < 32:
                     print("not enough features, padding with zeros")
                     features += [np.zeros((32, 32), dtype=np.float32)] * (32 - len(features))
@@ -129,7 +126,21 @@ def main():
                 z = torch.from_numpy(latent).to(device) # convert to tensor and move to GPU
 
                 with torch.no_grad():
-                    recon = net.decoder(z) if hasattr(net, "decoder") else net.decode(z)
+                    if hasattr(net, "decoder"):
+                        z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
+                        lstm_out = net.conv_lstm(z_seq)
+
+                        if net.project_lstm_to_latent is not None:
+                            print("Projecting LSTM output to latent space")
+                            hc = 2 * net.hidden_channels if net.bidirectional else net.hidden_channels
+                            lat = net.project_lstm_to_latent(lstm_out.view(-1, hc, 32, 32))
+                            lat = lat.view(1, 1, net.total_channels, 32, 32)
+                        else:
+                            lat = lstm_out
+
+                        recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
+                    else: 
+                        recon = net.decode(z)
 
                 save_img(recon, output_dir, frame_idx)
                 print(f"[receiver:v2] Frame {frame_idx} received {len(features)} features")
@@ -145,7 +156,22 @@ def main():
                 z = torch.from_numpy(latent).to(device)
 
                 with torch.no_grad():
-                    recon = net.decoder(z) if hasattr(net, "decoder") else net.decode(z)
+                    if hasattr(net, "decoder"):
+                        z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
+                        print("z seq", z_seq.shape)
+                        lstm_out = net.conv_lstm(z_seq)
+
+                        if net.project_lstm_to_latent is not None:
+                            print("Projecting LSTM output to latent space")
+                            hc = 2 * net.hidden_channels if net.bidirectional else net.hidden_channels
+                            lat = net.project_lstm_to_latent(lstm_out.view(-1, hc, 32, 32))
+                            lat = lat.view(1, 1, net.total_channels, 32, 32)
+                        else:
+                            lat = lstm_out
+
+                        recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
+                    else: 
+                        recon = net.decode(z)
 
                 save_img(recon, output_dir, frame_idx)
                 print(f"[receiver:v2] Frame {frame_idx} (timeout with {len(features)} features)")

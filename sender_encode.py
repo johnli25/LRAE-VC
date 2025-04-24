@@ -89,19 +89,18 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
             
             ## NOTE: optional sanity check! Save the original frame as an image
             z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
-            with torch.no_grad():
-                lstm_out = net.conv_lstm(z_seq)
+            lstm_out = net.conv_lstm(z_seq)
 
-                if net.project_lstm_to_latent is not None:
-                    print("Projecting LSTM output to latent space")
-                    hc = 2 * net.hidden_channels if net.bidirectional else net.hidden_channels
-                    lat = net.project_lstm_to_latent(lstm_out.view(-1, hc, 32, 32))
-                    lat = lat.view(1, 1, net.total_channels, 32, 32)
-                else:
-                    lat = lstm_out
+            if net.project_lstm_to_latent is not None:
+                print("Projecting LSTM output to latent space")
+                hc = 2 * net.hidden_channels if net.bidirectional else net.hidden_channels
+                lat = net.project_lstm_to_latent(lstm_out.view(-1, hc, 32, 32))
+                lat = lat.view(1, 1, net.total_channels, 32, 32)
+            else:
+                lat = lstm_out
 
-                recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
-                save_img(recon, "sender_frames/", frame_idx)
+            recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
+            save_img(recon, "sender_frames/", frame_idx)
             
         else: 
             z = net.encode(x) # PNC32
@@ -126,7 +125,7 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
         # print("frame_idx and feature:", frame_idx, i)
         packet = struct.pack("!III", frame_idx, i, len(compressed_payload)) + compressed_payload
         sock.sendto(packet, address)
-        time.sleep(0.001) # 1ms delay between packets
+        # time.sleep(0.001) # 1ms delay between packets
 
     compressed_payload = []
     # NOTE: return purely for bookkeeping purposes: 
