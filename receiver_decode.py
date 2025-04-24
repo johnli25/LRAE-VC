@@ -85,8 +85,12 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2**21)  # 2MB receive buffer
+    recv_buf = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+    print(f"Receive buffer size: {recv_buf} bytes")
+
     sock.bind((args.ip, args.port))
-    sock.settimeout(0.01) # timeout is 0.01 sec or 10 ms
+    sock.settimeout(1.0) # timeout of 1 second
     print(f"[receiver] Listening on {args.ip}:{args.port}")
 
     deadline_sec = args.deadline_ms / 1000.0 # convert b/c Python's time is in seconds
@@ -98,30 +102,25 @@ def main():
     while True:
         try:
             pkt, _ = sock.recvfrom(8192)
-            print("length of pkt", len(pkt))
+            # print("length of pkt", len(pkt))
             if frame_timestamp is None:
-                # unpack an unsigned 64‐bit timestamp from bytes 0–7
-                t0_ns = struct.unpack_from("!Q", pkt, 0)[0]
-                # frame_timestamp = t0_ns / 1000000.0   # convert to ms
-                frame_timestamp = time.monotonic_ns() / 1000000.0 
-                offset = 8  # skip the full 8‐byte header
-            else:
-                offset = 0
-            now = time.monotonic_ns() / 1000000.0 # convert to ms
-            
-            data_len = struct.unpack_from("!I", pkt, offset)[0]
-            print("data_len:", data_len)
-            data = pkt[offset + 4 : offset + 4 + data_len] # 4 bytes for length of data packet
-            feature = data # zlib.decompress(data)
+                frame_timestamp = time.monotonic_ns() / 1e6
+            now = time.monotonic_ns() / 1e6 # convert ns to ms
+
+            frame_idx, feature_num, data_len = struct.unpack_from("!III", pkt, 0)
+            data = pkt[12 : 12 + data_len]  # Extract the payload starting after the header
+            # print(f"Received pkt for frame_idx: {frame_idx}, feature_num: {feature_num}, data_len: {data_len}")
+
+            feature = zlib.decompress(data)
             feature = np.frombuffer(feature, dtype=np.uint8 if args.quant else np.float32)
-            print("feature shape:", feature.shape)
             if args.quant:
                 feature = feature.astype(np.float32) / 255.0
             features.append(feature.reshape(32, 32))
-            print(len(features), "features received")
-            print("now - frame_timestamp:", now - frame_timestamp)
-            print("now: ", now)
-            print("frame_timestamp: ", frame_timestamp)
+            # print(len(features), "features received")
+            # print("now - frame_timestamp:", now - frame_timestamp)
+            if frame_idx in {1,2,3,4,5,6,7}:
+                print(f"frame_idx: {frame_idx}, feature_num: {feature_num}, data_len: {data_len}, len(features): {len(features)}")
+                print("now - frame_timestamp:", now - frame_timestamp)
             if len(features) == 32 or (now - frame_timestamp > args.deadline_ms): # NOTE: args.deadline_ms does NOT include the time to decode + display!
                 if len(features) < 32:
                     print("not enough features, padding with zeros")
@@ -156,27 +155,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-##### Deprecated ###### 
-@deprecated
-def decode_super_pkt(payload, quant=False):
-    """Version 3"""
-    N = struct.unpack_from("!I", payload, 0)[0] # N = number of features
-    offsets = struct.unpack_from(f"!{N}I", payload, 4)
-    data_start = 4 + 4 * N
-    print("offsets:", offsets)
-    print("data_start:", data_start)
-
-    features = []
-    for i in range(N):
-        start = data_start + offsets[i]
-        end = data_start + offsets[i+1] if i < N-1 else None
-        feature = payload[start:end]
-        feature = zlib.decompress(feature)
-        feature = np.frombuffer(feature, dtype=np.uint8 if quant else np.float32) # if quantized, use uint8 initially and then convert to float32
-        if quant:
-            feature = feature.astype(np.float32) / 255.0
-        features.append(feature.reshape(32, 32))
-
-    latent = np.stack(features, axis=0) # stack 32 feature maps (each 32x32) into a (32, 32, 32) array
-    return np.expand_dims(latent, axis=0) # add batch dimension --> (1, 32, 32, 32)
