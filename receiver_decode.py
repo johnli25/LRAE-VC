@@ -21,7 +21,7 @@ def load_model(model_name, model_path, device, lstm_kwargs=None):
         model = checkpoint
 
     elif isinstance(checkpoint, dict): # Otherwise assume it's a state_dict
-        if any(k.startswith("module.") for k in checkpoint.keys()):
+        if any(k.startswith("module.") for k in checkpoint.keys()): # If the model was saved with DataParallel, remove "module." prefix
             checkpoint = {k.replace("module.", "", 1): v for k, v in checkpoint.items()}
 
         if model_name == "pnc32":
@@ -67,7 +67,7 @@ def main():
     parser.add_argument("--ip",          default="0.0.0.0")
     parser.add_argument("--lstm_kwargs", type=str, default=None,
                         help="JSON dict for ConvLSTM_AE constructor if loading state_dict")
-    parser.add_argument("--deadline_ms", type=int, default=30,
+    parser.add_argument("--deadline_ms", type=float, default=30,
                     help="Deadline in milliseconds per frame")
     parser.add_argument("--quant", action="store_true", help="enable integer-bit quantization (default: False)")
     
@@ -119,6 +119,8 @@ def main():
             # print(len(features), "features received")
             if len(features) == 32 or (now - frame_timestamp > args.deadline_ms): # NOTE: args.deadline_ms does NOT include the time to decode + display!
                 print("now - frame_timestamp:", now - frame_timestamp)
+                start_time = time.monotonic() * 1000
+                print(f"[receiver] Frame {frame_idx} received {len(features)} features")
                 if len(features) < 32:
                     print("not enough features, padding with zeros")
                     features += [np.zeros((32, 32), dtype=np.float32)] * (32 - len(features))
@@ -141,9 +143,10 @@ def main():
                         recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
                     else: 
                         recon = net.decode(z)
+                end_time = time.monotonic() * 1000
+                print("Time to decode + display:", end_time - start_time)
 
                 save_img(recon, output_dir, frame_idx)
-                print(f"[receiver:v2] Frame {frame_idx} received {len(features)} features")
                 frame_idx += 1
                 features.clear()
                 frame_timestamp = None
