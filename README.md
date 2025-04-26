@@ -12,7 +12,7 @@
   ```bash
   sudo apt-get remove --purge python3-opencv
   sudo -H pip3 install opencv-python-headless
-
+  ```
   This fixes the following issue:
   ```
   Traceback (most recent call last):
