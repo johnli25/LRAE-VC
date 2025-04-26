@@ -20,9 +20,6 @@
       import cv2, torch, numpy as np
   ImportError: /lib/libgdal.so.30: undefined symbol: TIFFGetStrileByteCount, version LIBTIFF_4.0
   ```
-  
-- 
-  
 
 #### Training
 - To run PNC autoencoder (no classification) `python autoencoder_train.py --model=PNC`
