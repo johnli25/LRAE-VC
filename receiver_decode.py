@@ -1,187 +1,191 @@
-import os
-import torch
-import socket
-import argparse
-import struct
+import argparse, os, socket, struct, zlib
+import cv2, torch, numpy as np
+import torch.nn as nn
+from models import PNC32Encoder, PNC32, ConvLSTM_AE
+import json
+import time
 import matplotlib.pyplot as plt
-import numpy as np
+import shutil
 from collections import defaultdict
-from models import PNC_Autoencoder, LRAE_VC_Autoencoder, FrameSequenceLSTM, TestNew, TestNew2, TestNew3
 
-frameID_to_latent_encodings = None # defaultdict(lambda: np.zeros((10, 32, 32), dtype=np.float32))
-encoding_shape = None
-
-def parse_args():
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Receiver Decoder")
-    parser.add_argument("--model_path", type=str, required=True, help="Path to the pre-trained autoencoder model (.pth)")
-    parser.add_argument("--host", type=str, required=True, help="Host IP address to bind the server")
-    parser.add_argument("--port", type=int, required=True, help="Port number to bind the server")
-    return parser.parse_args()
-
-
-def load_model(model_path, device):
-    global encoding_shape, frameID_to_latent_encodings
-    if "PNC" in model_path:
-        model = PNC_Autoencoder()
-        encoding_shape = (10, 32, 32)
-    elif "LRAE_VC" in model_path:
-        model = LRAE_VC_Autoencoder()
-        encoding_shape = (16, 28, 28)
-    elif "TestNew3" in model_path:
-        model = TestNew3()
-        encoding_shape = (24, 38, 38)
+def load_model(model_name, model_path, device, lstm_kwargs=None):
+    """
+    model_name: "pnc32" or "conv_lstm_PNC32_ae"
+    model_path: .pth file, either a full-saved model or a state_dict
+    lstm_kwargs: dict with keys (total_channels, hidden_channels, ae_model_name, bidirectional)
+                 required only when model_name=="conv_lstm_PNC32_ae" and you saved state_dict
+    """
+    checkpoint = torch.load(model_path, map_location=device)
     
-    # Initialize the frameID_to_latent_encodings dictionary dynamically
-    frameID_to_latent_encodings = defaultdict(lambda: np.zeros(encoding_shape, dtype=np.float32))
+    if isinstance(checkpoint, nn.Module): # If you saved the full model object:
+        print("LOADING FULL MODEL OBJECT")
+        model = checkpoint
+
+    elif isinstance(checkpoint, dict): # Otherwise assume it's a state_dict
+        if any(k.startswith("module.") for k in checkpoint.keys()): # If the model was saved with DataParallel, remove "module." prefix
+            checkpoint = {k.replace("module.", "", 1): v for k, v in checkpoint.items()}
+
+        if model_name == "pnc32":
+            model = PNC32()
+        elif model_name == "conv_lstm_PNC32_ae":
+            if lstm_kwargs is None:
+                raise ValueError("Must pass --lstm_kwargs for ConvLSTM_AE state_dict")
+            model = ConvLSTM_AE(**lstm_kwargs)
+        else:
+            raise ValueError(f"Unknown model_name: {model_name}")
+        
+        # Filter out unexpected keys
+        model_state_dict = model.state_dict()
+        filtered_checkpoint = {k: v for k, v in checkpoint.items() if k in model_state_dict}
+        missing_keys = [k for k in model_state_dict.keys() if k not in checkpoint]
+        unexpected_keys = [k for k in checkpoint.keys() if k not in model_state_dict]
+
+        if missing_keys:
+            print(f"Warning: Missing keys in checkpoint: {missing_keys}")
+        if unexpected_keys:
+            print(f"Warning: Ignoring unexpected keys in checkpoint: {unexpected_keys}")
+        
+        model.load_state_dict(filtered_checkpoint)
+    else:
+        raise RuntimeError(f"Unrecognized checkpoint type: {type(checkpoint)}")
+    return model.to(device).eval()
+
+
+def save_img(rgb_tensor, outdir, idx):
+    squeezed_tensor = rgb_tensor.squeeze(0) # Remove the batch dimension (squeeze the first dimension)
+    permuted_tensor = squeezed_tensor.permute(1, 2, 0) # Rearrange the tensor dimensions from (C, H, W) to (H, W, C) for image representation
+    img_array = permuted_tensor.cpu().numpy() # Move the tensor to the CPU and convert it to a NumPy array
+    img_array = img_array.clip(0, 1) # Scale pixel values to [0, 1] 
+    output_path = os.path.join(outdir, f"frame_{idx:04d}.png") 
+    plt.imsave(output_path, img_array)
     
-    # Load the pre-trained weights
-    model.load_state_dict(torch.load(model_path, map_location=device))
-    model.to(device)
-    model.eval()  # Set the model to evaluation mode
-    return model
 
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model",       required=True, choices=["pnc32","conv_lstm_PNC32_ae"])
+    parser.add_argument("--model_path", required=True, help=".pth with PNC32Decoder weights")
+    parser.add_argument("--port",        type=int, required=True)
+    parser.add_argument("--ip",          default="0.0.0.0")
+    parser.add_argument("--lstm_kwargs", type=str, default=None,
+                        help="JSON dict for ConvLSTM_AE constructor if loading state_dict")
+    parser.add_argument("--deadline_ms", type=float, default=30,
+                    help="Deadline in milliseconds per frame")
+    parser.add_argument("--quant", action="store_true", help="enable integer-bit quantization (default: False)")
+    
+    args = parser.parse_args()
 
-def decode_and_store(conn):
-    """Decode received encoded features and store latent encodings."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    lstm_kwargs = json.loads(args.lstm_kwargs) if args.lstm_kwargs else None
+    net = load_model(args.model, args.model_path, device, lstm_kwargs)
+
+    output_dir = "./receiver_frames"
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 * 2**21)  # 2MB receive buffer
+    recv_buf = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
+    print(f"Receive buffer size: {recv_buf} bytes")
+
+    sock.bind((args.ip, args.port))
+    sock.settimeout(1.0) # timeout of 1 second
+    print(f"[receiver] Listening on {args.ip}:{args.port}")
+
+    ##### Version 2: receive each feature separately #####
+    features_dict = defaultdict(lambda: [np.zeros((32, 32)) for _ in range(32)])    
+    frame_timestamp = None
+    deadline_ms = args.deadline_ms  
+    cur_frame = 0
+    TOTAL_FEATURES = 32
+    current_features_received = 0
+
     while True:
         try:
-            # Receive the size of the incoming data
-            size_data = conn.recv(4)
-            if not size_data:  # End of transmission when no data is received
-                break
-            data_size = struct.unpack("I", size_data)[0]
-            
-            # Receive metadata and feature bytes
-            data = conn.recv(data_size)
-            metadata_bytes = data[:12]  # First 12 bytes are metadata (3 unsigned integers) (vid #, img #, feature #)
-            feature_bytes = data[12:]  # Remaining bytes are the feature
-            
-            # Deserialize metadata
-            video_number, image_number, feature_number = struct.unpack("III", metadata_bytes)
-            
-            # Deserialize the feature
-            feature = np.frombuffer(feature_bytes, dtype=np.float32).reshape(encoding_shape[1], encoding_shape[2])
-            
-            # Update the latent encoding array
-            frameID_to_latent_encodings[(video_number, image_number)][feature_number, :, :] = feature # assumes 1 feature per frame (no frames entirely dropped)
-            # print(f"Updated latent encoding for video {video_number}, image {image_number}, feature {feature_number}")
-        except Exception as e:
-            print(f"Error during decoding or storing: {e}")
-            break
+            pkt, _ = sock.recvfrom(4096)
+            frame_idx, feature_num, data_len = struct.unpack_from("!III", pkt, 0)
+            if frame_timestamp is None:
+                frame_timestamp = time.monotonic_ns() / 1e6 # convert to milliseconds
+            if cur_frame != frame_idx:  # IMPORTANT NOTE: if frame_idx is not the expected one, skip. This also drops frames that are 1) out of order or 2) arrived past the deadline! 
+                continue
+
+            data = pkt[12 : 12 + data_len]  # Extract the payload starting after the header
+            # print(f"Received pkt for frame_idx: {frame_idx}, feature_num: {feature_num}, data_len: {data_len}")
+            feature = zlib.decompress(data)
+            feature = np.frombuffer(feature, dtype=np.uint8 if args.quant else np.float32)
+            if args.quant:
+                feature = feature.astype(np.float32) / 255.0
+            feature = feature.reshape(32, 32) # Reshape to 
+            features_dict[frame_idx][feature_num] = feature # NOTE: this is a list of 32 features, each 32x32
+            current_features_received += 1
+            # print(len(features_dict[frame_idx]), "features received")
+
+            now = time.monotonic_ns() / 1e6 # convert to milliseconds
+            if current_features_received == TOTAL_FEATURES or (now - frame_timestamp > args.deadline_ms): # NOTE: args.deadline_ms does NOT include the time to decode + display!
+                print("now - frame_timestamp:", now - frame_timestamp)
+                start_decode_time = time.monotonic() * 1000
+                print(f"[receiver] Frame {frame_idx} received {current_features_received} features")
+                latent = np.stack(features_dict[frame_idx])[None, ...] # NOTE: stack 32 feature maps (each 32x32) into a (32, 32, 32) array and [None, ...] adds batch dimension --> (1, 32, 32, 32)
+                z = torch.from_numpy(latent).to(device).float() # Convert to float PyTorch tensor and move to device
+
+                with torch.no_grad():
+                    if hasattr(net, "decoder"):
+                        z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
+                        lstm_out = net.conv_lstm(z_seq)
+
+                        if net.project_lstm_to_latent is not None:
+                            print("Projecting LSTM output to latent space")
+                            hc = 2 * net.hidden_channels if net.bidirectional else net.hidden_channels
+                            lat = net.project_lstm_to_latent(lstm_out.view(-1, hc, 32, 32))
+                            lat = lat.view(1, 1, net.total_channels, 32, 32)
+                        else:
+                            lat = lstm_out
+
+                        recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
+                    else: 
+                        recon = net.decode(z)
+                end_decode_time = time.monotonic() * 1000
+                print("Time to decode:", end_decode_time - start_decode_time)
+
+                save_img(recon, output_dir, frame_idx)
+                cur_frame = frame_idx + 1
+                frame_timestamp = None
+                current_features_received = 0
 
 
-def feature_filler(device, input_dim, hidden_dim, output_dim, num_layers):
-    video_tensors = {}
-    for (video_number, image_number), tensor in frameID_to_latent_encodings.items():
-        if video_number not in video_tensors:
-            video_tensors[video_number] = []
-        video_tensors[video_number].append((image_number, tensor))
+        except socket.timeout:
+            if frame_timestamp and current_features_received > 0:
+                print(f"[receiver:timeout] Frame {cur_frame} timed out with {current_features_received} features")
+                features = features_dict[cur_frame]
 
-    # Sort image_numbers and stack tensors for each video_number
-    for video_number, tensors in video_tensors.items():
-        # Sort tensors by image_number
-        tensors.sort(key=lambda x: x[0])
-        # Stack tensors
-        video_tensor = np.stack([tensor for _, tensor in tensors])
-        video_tensor = torch.tensor(video_tensor, dtype=torch.float32)
-        
-        video_tensor = video_tensor.transpose(0, 1).to(device) # Now (10, X, 32, 32) or (16, X, 28, 28)
+                # Stack features into latent tensor
+                latent = np.stack(features)[None, ...]  # shape: (1, 32, 32, 32)
+                z = torch.from_numpy(latent).to(device).float()
 
-        for feature_num in range(video_tensor.shape[0]):
-            for frame_num in range(video_tensor.shape[1]):
-                if torch.all(video_tensor[feature_num][frame_num] == 0):
-                    print("ALL ZEROES FOUND")
-                    print("Video: " + str(video_number) + " Image: " + str(frame_num) + " Feature: " + str(feature_num))
-                    # Fill in item if all zeroes detected
-                    model = FrameSequenceLSTM(input_dim, hidden_dim, output_dim, num_layers)
-                    model.load_state_dict(torch.load(f"features_num_directory/feature_{feature_num}_final.pth", map_location=device))
-                    model.to(device)
-                    model.eval()  # Set the model to evaluation mode
-                    outputted_sequence = model(video_tensor[feature_num].unsqueeze(0)) # Requires (1, X, 32, 32), so i Unsqueeze, output is same size
-                    #.cpu() and .detach() methods required for converting tensor to np array after gpu processing
-                    frameID_to_latent_encodings[(video_number, frame_num)][feature_num, :, :] = outputted_sequence[0][frame_num].cpu().detach()
-                    
+                with torch.no_grad():
+                    if hasattr(net, "decoder"):
+                        z_seq = z.unsqueeze(1)  # (1, 1, 32, 32, 32)
+                        lstm_out = net.conv_lstm(z_seq)
 
-def decode_full_frame_and_save_all(model, output_dir, device):
-    """Decode the full frame from stored latent encodings and save for all video-image frames."""
-    print(f"Total size of frameID to latent encodings dict: {len(frameID_to_latent_encodings)}")
-    
-    for (video_number, image_number), latent_encodings in frameID_to_latent_encodings.items():
-        if latent_encodings is None:
-            print(f"No latent encodings found for video {video_number}, image {image_number}")
-            continue
+                        if net.project_lstm_to_latent is not None:
+                            print("Projecting LSTM output to latent space")
+                            hc = 2 * net.hidden_channels if net.bidirectional else net.hidden_channels
+                            lat = net.project_lstm_to_latent(lstm_out.view(-1, hc, 32, 32))
+                            lat = lat.view(1, 1, net.total_channels, 32, 32)
+                        else:
+                            lat = lstm_out
 
-        # Convert latent encodings to PyTorch tensor
-        latent_tensor = torch.tensor(latent_encodings, dtype=torch.float32).unsqueeze(0).to(device)  # Shape: (1, 10, 32, 32)
-        
-        # Decode the full frame
-        with torch.no_grad():
-            decoded_img = model.decode(latent_tensor)
-        
-        # Save the decoded image
-        decoded_img = decoded_img.squeeze(0).permute(1, 2, 0).cpu().numpy()  
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        output_path = os.path.join(output_dir, f"video_{video_number}_img_{image_number}.png")
-        plt.imsave(output_path, decoded_img)
-        print(f"Saved decoded full frame to {output_path}")
+                        recon = net.decoder(lat[:, 0])
+                    else:
+                        recon = net.decode(z)
 
-
-def print_frameID_to_latent_encodings(output_file):
-    with open(output_file, 'w') as f:
-        for (video_number, image_number), latent_encodings in frameID_to_latent_encodings.items():
-            if video_number == 0:
-                f.write(f"Video {video_number}, Image {image_number}:\n")
-                for i in range(latent_encodings.shape[0]):
-                    f.write(f"  Index {i}:\n")
-                    f.write("  [\n")
-                    for row in latent_encodings[i]:
-                        f.write("    " + np.array2string(row, formatter={'float_kind':lambda x: '%.3f' % x}) + "\n")
-                    f.write("  ]\n")
-                f.write("\n")
+                save_img(recon, output_dir, cur_frame)
+                cur_frame += 1
+                frame_timestamp = None
+                current_features_received = 0
 
 
 if __name__ == "__main__":
-    # Hyperparameters
-    hidden_dim = 128 # Tuned hyperparameter for LSTM
-    num_layers = 2
-
-    args = parse_args()
-    if "TestNew3" in args.model_path: print("yes", args.model_path)
-    if "PNC" in args.model_path:
-        input_dim = 32 * 32  # Flattened frame size (idk if this is 32x32 or 28x28)
-        output_dim = 32 * 32 #(THIS AND INPUT_DIM NEED TO BE CHANGED BASED ON ARCHITECTURE)
-    elif "LRAE_VC" in args.model_path:
-        input_dim = 28 * 28  # Flattened frame size (idk if this is 32x32 or 28x28)
-        output_dim = 28 * 28 #(THIS AND INPUT_DIM NEED TO BE CHANGED BASED ON ARCHITECTURE)
-    elif "TestNew3" in args.model_path:
-        input_dim = 38 * 38 # Flattened frame size (idk if this is 32x32 or 28x28)
-        output_dim = 38 * 38 #(THIS AND INPUT_DIM NEED TO BE CHANGED BASED ON ARCHITECTURE)
-    else:
-        print(f"Unknown model type in model_path: {args.model_path}")
-    
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("device:", device)
-    
-    model = load_model(args.model_path, device) # Load the model
-    
-    # set up server socket
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind((args.host, args.port))
-    server_socket.listen(1)
-    print(f"Listening on {args.host}:{args.port}...")
-    
-    conn, addr = server_socket.accept()
-    print(f"Connection established with {addr}")
-    
-    try:
-        decode_and_store(conn)
-        feature_filler(device, input_dim, hidden_dim, output_dim, num_layers) # NOTE: comment this to toggle feature filling vs no feature filling
-        decode_full_frame_and_save_all(model, output_dir="TestNew3_w_dropouts_received_and_decoded_frames_filled/", device=device)
-    finally:
-        conn.close()
-        server_socket.close()
-
-
-    # print_frameID_to_latent_encodings("frameID_to_latent_encodings.txt")
+    main()

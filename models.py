@@ -115,7 +115,46 @@ class PNC16(nn.Module):
 
         return y5
     
+class PNC16Encoder(nn.Module): # Conv Encoder
+    def __init__(self):
+        super(PNC16Encoder, self).__init__()
+        
+        # Encoder layers exactly matching PNC16
+        self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (16, 32, 32)
+        self.encoder2 = nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (16, 32, 32)
 
+        # Activation function
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        """Encodes the input image to (16, 32, 32) feature space."""
+        x = self.relu(self.encoder1(x))  # (3, 224, 224) -> (16, 32, 32)
+        x = self.relu(self.encoder2(x))  # (16, 32, 32) -> (16, 32, 32)
+        return x
+
+class PNC16Decoder(nn.Module): # Conv Decoder
+    def __init__(self):
+        super().__init__()
+        # Same conv layers as in PNC16 decode
+        self.decoder1 = nn.ConvTranspose2d(16, 64, kernel_size=9, stride=7, padding=4, output_padding=6)
+        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
+        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
+        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)
+        self.relu = nn.ReLU()
+    
+    def forward(self, x):
+        # x: (batch_size, 16, 32, 32)
+        y1 = self.relu(self.decoder1(x))   # -> (batch_size, 64, 224, 224)
+        y2 = self.relu(self.decoder2(y1))    # -> (batch_size, 64, 224, 224)
+        y2 = y2 + y1
+        y3 = self.relu(self.decoder3(y2))    # -> (batch_size, 64, 224, 224)
+        y4 = self.relu(self.decoder3(y3))    # -> (batch_size, 64, 224, 224)
+        y4 = y4 + y3
+        y5 = self.final_layer(y4)            # -> (batch_size, 3, 224, 224)
+        y5 = torch.clamp(y5, 0, 1)
+        return y5
+    
+    
 class PNC32(nn.Module):
     def __init__(self):
         super(PNC32, self).__init__()
@@ -181,47 +220,6 @@ class PNC32(nn.Module):
         return x_quantized
     
 
-
-class PNC16Encoder(nn.Module): # Conv Encoder
-    def __init__(self):
-        super(PNC16Encoder, self).__init__()
-        
-        # Encoder layers exactly matching PNC16
-        self.encoder1 = nn.Conv2d(3, 16, kernel_size=9, stride=7, padding=4)  # (3, 224, 224) -> (16, 32, 32)
-        self.encoder2 = nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1)  # (16, 32, 32) -> (16, 32, 32)
-
-        # Activation function
-        self.relu = nn.ReLU()
-
-    def forward(self, x):
-        """Encodes the input image to (16, 32, 32) feature space."""
-        x = self.relu(self.encoder1(x))  # (3, 224, 224) -> (16, 32, 32)
-        x = self.relu(self.encoder2(x))  # (16, 32, 32) -> (16, 32, 32)
-        return x
-
-class PNC16Decoder(nn.Module): # Conv Decoder
-    def __init__(self):
-        super().__init__()
-        # Same conv layers as in PNC16 decode
-        self.decoder1 = nn.ConvTranspose2d(16, 64, kernel_size=9, stride=7, padding=4, output_padding=6)
-        self.decoder2 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
-        self.decoder3 = nn.Conv2d(64, 64, kernel_size=5, stride=1, padding=2)
-        self.final_layer = nn.Conv2d(64, 3, kernel_size=3, stride=1, padding=1)
-        self.relu = nn.ReLU()
-    
-    def forward(self, x):
-        # x: (batch_size, 16, 32, 32)
-        y1 = self.relu(self.decoder1(x))   # -> (batch_size, 64, 224, 224)
-        y2 = self.relu(self.decoder2(y1))    # -> (batch_size, 64, 224, 224)
-        y2 = y2 + y1
-        y3 = self.relu(self.decoder3(y2))    # -> (batch_size, 64, 224, 224)
-        y4 = self.relu(self.decoder3(y3))    # -> (batch_size, 64, 224, 224)
-        y4 = y4 + y3
-        y5 = self.final_layer(y4)            # -> (batch_size, 3, 224, 224)
-        y5 = torch.clamp(y5, 0, 1)
-        return y5
-    
-
 class PNC32Encoder(nn.Module):
     """
     Encoder that maps an input image (3, 224, 224) to a latent space with 32 channels 
@@ -278,24 +276,12 @@ class ConvLSTMCell(nn.Module):
             padding=padding
         )
 
-        # A learnable drift term (initialized small) that will be used only when quality is low
-        # Shape is (hidden_channels, 1, 1) so that it can be expanded to match spatial dimensions
-        self.drift = nn.Parameter(torch.randn(hidden_channels, 1, 1) * 0.01)
-
     def forward(self, x, h, c, quality=1.0): 
         """
         x: (batch, input_channels, H, W) - input tensor
         h: (batch, hidden_channels, H, W) - hidden state
         c: (batch, hidden_channels, H, W) - cell state
-        quality: (batch, )
         """
-        # print("quality:", quality)
-        # Ensure quality is a tensor and has shape (batch, 1, 1, 1) for broadcasting
-        if not torch.is_tensor(quality):
-            quality = torch.tensor(quality, device=x.device, dtype=x.dtype)
-        if quality.dim() == 1:
-            quality = quality.view(-1, 1, 1, 1)
-
         combined = torch.cat([x, h], dim=1)  # Concatenate along channel dimension
         gates = self.conv(combined)  # (batch, 4 * hidden_channels, H, W)
 
@@ -307,10 +293,7 @@ class ConvLSTMCell(nn.Module):
         g = torch.tanh(gates[:, 3*chunk:4*chunk]) # Candidate Cell State: Represents the new info that could be added to the cell state.
 
         # Update cell state and hidden state
-        # NOTE: When quality is 0, (1 - quality) becomes 1, so drift is fully applied.
-        # NOTE: When quality is 1, drift is effectively canceled.
-        # print(f"self.drift = {self.drift.shape} and 1-quality = {(1-quality).shape}")
-        c = f * c + quality * i * g # + (1 - quality) * self.drift.expand_as(c) # Acts as the “memory” of the cell, carrying LONG-TERM info 
+        c = f * c + i * g 
         h = o * torch.tanh(c) # # Hidden State: acts as output of the LSTM cell. It is used both to produce the cell’s final output and to serve as part of the input to the next time step.
         
         return h, c
@@ -321,19 +304,8 @@ class ConvLSTM(nn.Module):
         super().__init__()
         self.cell = ConvLSTMCell(input_channels, hidden_channels)
         self.hidden_channels = hidden_channels
-
-        self.quality_factors = []
-        threshold = int(0.9 * input_channels)
-        self.beta = 0.01
-
-        for i in range(input_channels + 1):
-            if 0 <= i <= threshold:
-                self.quality_factors.append(1.0)
-            else:
-                # self.quality_factors.append(1.0 - (i - threshold) * 0.1)
-                self.quality_factors.append(1.0)
     
-    def forward(self, x_seq, drop_levels=[]):
+    def forward(self, x_seq):
         """
         x_seq: (batch, seq_len, input_channels, H, W)
         drop_levels: list of length seq_len, each element is a list of length batch_size
@@ -347,20 +319,7 @@ class ConvLSTM(nn.Module):
         outputs = []
         for t in range(seq_len):
             x_t = x_seq[:, t] # extracts the t-th frame, where shape is (batch, input_channels, H, W) e.g. (batch, 32, 32, 32)
-            quality_degrees = [1.0] * bsz
-        
-            if len(drop_levels) > 0 and t > 0:
-                cur_drops, prev_drops = drop_levels[:, t], drop_levels[:, t - 1] # shape: (batch_size,)
-                for i, (cur_drop, prev_drop) in enumerate(zip(cur_drops, prev_drops)):
-                    diff = max(0, cur_drop - prev_drop)
-                    quality_degrees[i] = self.quality_factors[cur_drop] * math.exp(-self.beta * diff) if self.quality_factors[cur_drop] != 1.0 else 1.0
-                
-                # print("\ncurr drop_levels:", cur_drops)
-                # print("prev drop_levels:", prev_drops)
-                # print("quality_degrees:", quality_degrees)
-            quality_degrees = torch.tensor(quality_degrees, device=x_seq.device, dtype=x_seq.dtype)
-
-            h, c = self.cell(x_t, h, c, quality_degrees)  # update hidden and cell states
+            h, c = self.cell(x_t, h, c)  # update hidden and cell states
             outputs.append(h.unsqueeze(1)) # NOTE: append the hidden state for this time step. unsqueeze(1) b/c we want to add a new dimension for time!!
 
         return torch.cat(outputs, dim=1)  # (batch, seq_len, hidden_channels, H, W)
@@ -378,7 +337,7 @@ class ConvBiLSTM(nn.Module):
         self.forward_cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
         self.backward_cell = ConvLSTMCell(input_channels, hidden_channels, kernel_size)
 
-    def forward(self, x_seq, drop_levels=[]):
+    def forward(self, x_seq):
         """
         x: (batch, seq_len, input_channels, H, W)
         returns h_out of shape (batch, seq_len, 2 * hidden_channels, H, W) since forward + backward states are concatenated
@@ -386,7 +345,7 @@ class ConvBiLSTM(nn.Module):
         batch_size, seq_len, input_channels, H, W = x_seq.shape 
 
         # buffers for forward pass
-        h_forward, c_forward = [], []
+        h_forward = []
 
         # initialize
         h_f = torch.zeros(batch_size, self.hidden_channels, H, W).to(x_seq.device)
@@ -398,7 +357,7 @@ class ConvBiLSTM(nn.Module):
             h_forward.append(h_f.unsqueeze(1))
 
         # buffers for backward pass
-        h_backward, c_backward = [], []
+        h_backward = []
 
         # initialize
         h_b = torch.zeros(batch_size, self.hidden_channels, H, W).to(x_seq.device)
@@ -478,22 +437,10 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                 features = features.clone()  # avoid in-place modifications
                 # use consecutive dropout if specified
                 if eval_consecutive is not None:
-                    # NOTE: Using below code, the drop is applied on the last frame of each cycle only (when t % (eval_consecutive+1) equals eval_consecutive)
-                    # consecutive_drops = (
-                    #     torch.full((features.size(0),), drop, device=features.device)
-                    #     if t % (eval_consecutive + 1) == eval_consecutive
-                    #     else torch.zeros((features.size(0),), device=features.device)
-                    # )
-
                     # NOTE: Using below code, the first frame of each cycle (when t % (eval_consecutive+1) drops 0 features, and the subsequent eval_consecutive frames drop 'drop' features) 
-                    # if t == 0:
-                    #     consecutive_drops = torch.full((features.size(0),), drop, device=features.device)
-                    # elif t == 1: # or t == 2 or t == 3:
-                    #     consecutive_drops = torch.zeros((features.size(0),), device=features.device)
-                    # else:
                     consecutive_drops = (
                         torch.zeros((features.size(0),), device=features.device)
-                        if t % (eval_consecutive + 1) != 0
+                        if t % (eval_consecutive + 1) != 0 # or t == 0 # add t == 0 if you want to unconditionally force the first frame to have NO loss/dropout
                         else torch.full((features.size(0),), drop, device=features.device)
                     )
 
@@ -510,7 +457,6 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                         current_drop.append(random_drop.item())
                         if random_drop > 0:
                             features[i, -random_drop:, :, :] = 0.0
-                # if none of the above, apply constant drop 
                 else:
                     # Evaluation: drop a CONSTANT number of tail channels (e.g., exactly 'drop' amt of channels)
                     features[:, -drop:, :, :] = 0.0
@@ -530,8 +476,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         # stack features along the time dimension (seq_len dimension = 1)
         lstm_input = torch.stack(partial_list, dim=1) # (batch, seq_len, 16, 32, 32)
 
-        # lstm_out = self.conv_bi_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32)
-        lstm_out = self.conv_lstm(x_seq=lstm_input, drop_levels=drop_levels_tensor) # (batch, seq_len, hidden_channels, 32, 32) 
+        lstm_out = self.conv_lstm(x_seq=lstm_input) # (batch, seq_len, hidden_channels, 32, 32) 
 
         # if needed, map hidden state to total_channels, and finally decode!!
         if self.project_lstm_to_latent is not None:

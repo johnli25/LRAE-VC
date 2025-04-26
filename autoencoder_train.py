@@ -10,7 +10,8 @@ import matplotlib.pyplot as plt
 import argparse
 from models import PNC_Autoencoder, PNC16, PNC32, TestNew, TestNew2, TestNew3, LRAE_VC_Autoencoder
 import random
-import zlib
+import time, csv
+from pytorch_msssim import ssim
 
 # NOTE: uncomment below if you're using UCF Sports Action 
 class_map = {
@@ -19,7 +20,8 @@ class_map = {
 }
 
 test_img_names = {
-    "Diving-Side_001", "Golf-Swing-Front_005", "Kicking-Front_003", 
+    "Diving-Side_001",
+     "Golf-Swing-Front_005", "Kicking-Front_003", 
     # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
@@ -91,7 +93,7 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
         train_losses.append(train_loss)
 
         # Validate the model
-        val_loss = eval_autoencoder(model, val_loader, criterion, device, max_tail_length, quantize)
+        val_loss, _, _ = eval_autoencoder(model, val_loader, criterion, device, max_tail_length, quantize)
         val_losses.append(val_loss)
 
         # Save the best model
@@ -115,43 +117,58 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
     else: torch.save(model.state_dict(), f"{model_name}_final_no_dropouts.pth")
 
     # Final Test: test_autoencoder()
-    test_loss = eval_autoencoder(model, test_loader, criterion, device, max_tail_length, quantize)
+    test_loss, _, _ = eval_autoencoder(model, test_loader, criterion, device, max_tail_length, quantize)
     print(f"Final Test Loss: {test_loss:.4f}")
 
 
 def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None, quantize=0):
     model.eval()
-    test_loss = 0
+    total_mse = 0.0
+    total_psnr = 0.0
+    total_ssim = 0.0
+    num_samples = 0
     with torch.no_grad():
         for inputs, _ in dataloader:
             # torch.manual_seed(seed=42)
             # tail_len = torch.randint(0, max_tail_length, (1,)).item() if max_tail_length else None
             # print("Eval tail length: ", tail_len)
             inputs = inputs.to(device)
+
             outputs = model(x=inputs, tail_length=max_tail_length, quantize_level=quantize)
 
-
             ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
-            frame_latent = model.encode(inputs[0])
-            if quantize > 0:
-                features_cpu = frame_latent.detach().cpu().numpy()
-                features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
-                compressed = zlib.compress(features_uint8.tobytes())
-                latent_num_bytes = len(compressed)
-                print(f"[Simulated Compression] Frame 0 compressed size (quantized to uint8): {latent_num_bytes} bytes "
-                    f"(Original shape: {tuple(frame_latent.shape)})")
-            else:
-                features_cpu = frame_latent.detach().cpu().numpy().astype(np.float32)
-                compressed = zlib.compress(features_cpu.tobytes())
-                latent_num_bytes = len(compressed)
+            # frame_latent = model.module.encode(inputs[0])
+            # if quantize > 0:    
+            #     features_cpu = frame_latent.detach().cpu().numpy()
+            #     features_uint8 = (features_cpu * 255).astype(np.uint8)  # Convert to uint8
+            #     compressed = zlib.compress(features_uint8.tobytes())
+            #     latent_num_bytes = len(compressed)
+            #     print(f"[Simulated Compression] Frame 0 compressed size (quantized to uint8): {latent_num_bytes} bytes "
+            #         f"(Original shape: {tuple(frame_latent.shape)})")
+            # else:
+            #     features_cpu = frame_latent.detach().cpu().numpy().astype(np.float32)
+            #     compressed = zlib.compress(features_cpu.tobytes())
+            #     latent_num_bytes = len(compressed)
                 # print(f"[Simulated Compression] Frame 0 compressed size (float32): {latent_num_bytes} bytes "
                 #     f"(Original shape: {tuple(frame_latent.shape)})")
             ##############
 
-            loss = criterion(outputs, inputs)
-            test_loss += loss.item() * inputs.size(0)
+            # Compute MSE loss
+            mse_loss = criterion(outputs, inputs)
+            total_mse += mse_loss.item() * inputs.size(0)
 
-    return test_loss / len(dataloader.dataset)
+            # Compute SSIM
+            ssim_value = ssim(inputs, outputs, data_range=1.0, size_average=False)
+            total_ssim += ssim_value.sum().item()
+
+            num_samples += inputs.size(0)
+
+    assert len(dataloader.dataset) == num_samples, "Mismatch error between dataset size and number of samples processed"
+    average_mse = total_mse / num_samples
+    average_psnr = 20 * np.log10(1) - 10 * np.log10(average_mse)
+    average_ssim = total_ssim / num_samples
+
+    return average_mse, average_psnr, average_ssim
 
 
 def plot_train_val_loss(train_losses, val_losses):
@@ -170,6 +187,9 @@ def plot_train_val_loss(train_losses, val_losses):
     plt.savefig('train_val_loss_curve.png', dpi=300)
     plt.show()
 
+def psnr(mse):
+    return 20 * np.log10(1) - 10 * np.log10(mse)
+
 
 if __name__ == "__main__":
     def parse_args():
@@ -185,7 +205,7 @@ if __name__ == "__main__":
     args = parse_args()
 
     ## Hyperparameters
-    tail_len_drops = args.drops
+    drops = args.drops
     num_epochs = args.epochs
     batch_size = 32
     learning_rate = 1e-3
@@ -289,12 +309,12 @@ if __name__ == "__main__":
         # NOTE: JUST FOR JOHN'S VM B/C IT USES 2 GPUs: 
         checkpoint = convertFromNormalToDataParallel(checkpoint)
         
-        if any(key.startswith("module.") for key in checkpoint.keys()):
-            print("Converting from DataParallel model to normal model")
-            checkpoint = convertFromDataParallelNormal(checkpoint)
-        else:
-            print("Converting from normal model to DataParallel model")
-            checkpoint = convertFromNormalToDataParallel(checkpoint)
+        # if any(key.startswith("module.") for key in checkpoint.keys()):
+        #     print("Converting from DataParallel model to normal model")
+        #     checkpoint = convertFromDataParallelNormal(checkpoint)
+        # else:
+        #     print("Converting from normal model to DataParallel model")
+        #     checkpoint = convertFromNormalToDataParallel(checkpoint)
         
         model.load_state_dict(checkpoint)
 
@@ -302,39 +322,43 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
     # train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length, quantize=args.quantize) # max_tail_length = None or 10 (in the case of PNC)
 
-    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28, 29]
-    for tail_len_drops in tail_len_drops:
-        print(f"Tail length: {tail_len_drops}")
-        final_test_loss = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drops, quantize=args.quantize)
-        print(f"Final Test Loss: {final_test_loss:.4f}")
-
-    # Save images generated by DECODER ONLY! 
-    # output_path = "output_test_imgs_post_training/"
-    # if not os.path.exists(output_path):
-    #     print(f"Creating directory: {output_path}")
-    #     os.makedirs(output_path)
-
-    
     # NOTE: uncomment below for hardcoded tail_len_drops for more AUTOMATED evaluation. Otherwise, leave commented in!
-    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28, 29]
+    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]
+    mse_list, psnr_list, ssim_list = [], [], []
     for tail_len_drop in tail_len_drops:
         print(f"Tail length: {tail_len_drop}")
-        final_test_loss = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drop, quantize=args.quantize)
-        print(f"Final Test Loss: {final_test_loss:.6f}")
+        final_test_loss, final_psnr, final_ssim = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drop, quantize=args.quantize)
+        mse_list.append(final_test_loss)
+        psnr_list.append(final_psnr)
+        ssim_list.append(final_ssim)
+        print(f"Final Test Loss: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim:.6f}")
 
+    csv_file = "PNC_results.csv"
 
-    # final_test_loss = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drops, quantize=args.quantize)
-    # print(f"Final Test Loss: {final_test_loss:.4f}")
+    with open(csv_file, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['tail_len_drop', 'MSE', 'PSNR', 'SSIM'])  # header
+        for i in range(len(tail_len_drops)):
+            writer.writerow([tail_len_drops[i], mse_list[i], psnr_list[i], ssim_list[i]])
 
-    # model.eval()  # Put the autoencoder in eval mode
-    # with torch.no_grad():
-    #     for i, (inputs, filenames) in enumerate(test_loader):
-    #         inputs = inputs.to(device)
-    #         outputs = model(inputs, tail_len_drops, args.quantize)  # Forward pass through autoencoder
+    # final_test_loss, final_psnr, final_ssim = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drops, quantize=args.quantize)
+    # print(f"Final Test Loss: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim:.6f}")
 
-    #         # outputs is (batch_size, 3, image_h, image_w)
-    #         print(f"Batch {i+1}/{len(test_loader)}, Output shape: {outputs.shape}")
-    #         # Save each reconstructed image
-    #         for j in range(inputs.size(0)):
-    #             output_np = outputs[j].permute(1, 2, 0).cpu().numpy()  # (image_h, image_w, 3)
-    #             plt.imsave(os.path.join(output_path, filenames[j]), output_np)
+    # Save images generated by DECODER ONLY! 
+    output_path = "PNC_test_imgs_post_training/"
+    if not os.path.exists(output_path):
+        print(f"Creating directory: {output_path}")
+        os.makedirs(output_path)
+
+    model.eval()  # Put the autoencoder in eval mode
+    with torch.no_grad():
+        for i, (inputs, filenames) in enumerate(test_loader):
+            inputs = inputs.to(device)
+            outputs = model(inputs, 28, args.quantize)  # Forward pass through autoencoder
+
+            # outputs is (batch_size, 3, image_h, image_w)
+            print(f"Batch {i+1}/{len(test_loader)}, Output shape: {outputs.shape}")
+            # Save each reconstructed image
+            for j in range(inputs.size(0)):
+                output_np = outputs[j].permute(1, 2, 0).cpu().numpy()  # (image_h, image_w, 3)
+                plt.imsave(os.path.join(output_path, filenames[j]), output_np)
