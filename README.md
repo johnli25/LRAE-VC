@@ -1,17 +1,28 @@
 # LRAE-VC (Currently renaming/refactoring to CASTR) 
 
 ## Commands, Instructions, Setup
-- Setting up server, Conda, and GPUs (based on UIUC NCSA's Delta server): https://docs.google.com/document/d/1U5KpvcJr5ousA-zq9EcdzArJlSgpgM4wdYXXYV6tCLg/edit?tab=t.0
-- Quick and helpful Mininet debug: https://installfights.blogspot.com/2016/12/exception-could-not-find-default.html 
-- ```sudo apt-get remove --purge python3-opencv
-sudo -H pip3 install opencv-python-headless
-``` to fix this issue:
-```
-Traceback (most recent call last):
-  File "/mnt/data/johnli/LRAE-VC/mininet_test/mininet_sender.py", line 2, in <module>
-    import cv2, torch, numpy as np
-ImportError: /lib/libgdal.so.30: undefined symbol: TIFFGetStrileByteCount, version LIBTIFF_4.0
-```
+
+- Setting up server, Conda, and GPUs (based on UIUC NCSA's Delta server):  
+  [UIUC NCSA Delta Server Setup Guide](https://docs.google.com/document/d/1U5KpvcJr5ousA-zq9EcdzArJlSgpgM4wdYXXYV6tCLg/edit?tab=t.0)
+
+- Quick and helpful Mininet debug:  
+  [Mininet Debug Guide](https://installfights.blogspot.com/2016/12/exception-could-not-find-default.html)
+
+- Run the following commands to fix the OpenCV issue:
+  ```bash
+  sudo apt-get remove --purge python3-opencv
+  sudo -H pip3 install opencv-python-headless
+
+  This fixes the following issue:
+  ```
+  Traceback (most recent call last):
+    File "/mnt/data/johnli/LRAE-VC/mininet_test/mininet_sender.py", line 2, in <module>
+      import cv2, torch, numpy as np
+  ImportError: /lib/libgdal.so.30: undefined symbol: TIFFGetStrileByteCount, version LIBTIFF_4.0
+  ```
+  
+- 
+  
 
 #### Training
 - To run PNC autoencoder (no classification) `python autoencoder_train.py --model=PNC`
