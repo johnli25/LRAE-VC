@@ -440,7 +440,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                     # NOTE: Using below code, the first frame of each cycle (when t % (eval_consecutive+1) drops 0 features, and the subsequent eval_consecutive frames drop 'drop' features) 
                     consecutive_drops = (
                         torch.zeros((features.size(0),), device=features.device)
-                        if t % (eval_consecutive + 1) == 0 # or t == 0 # add t == 0 if you want to unconditionally force the first frame to have NO loss/dropout
+                        if t % (eval_consecutive + 1) != 0 # or t == 0 # add t == 0 if you want to unconditionally force the first frame to have NO loss/dropout
                         else torch.full((features.size(0),), drop, device=features.device)
                     )
 

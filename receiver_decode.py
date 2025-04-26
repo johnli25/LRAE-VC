@@ -94,8 +94,6 @@ def main():
     sock.settimeout(1.0) # timeout of 1 second
     print(f"[receiver] Listening on {args.ip}:{args.port}")
 
-    deadline_sec = args.deadline_ms / 1000.0 # convert b/c Python's time is in seconds
-
     ##### Version 2: receive each feature separately #####
     features_dict = defaultdict(lambda: [np.zeros((32, 32)) for _ in range(32)])    
     frame_timestamp = None
