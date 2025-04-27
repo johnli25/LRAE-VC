@@ -6,14 +6,54 @@
   [UIUC NCSA Delta Server Setup Guide](https://docs.google.com/document/d/1U5KpvcJr5ousA-zq9EcdzArJlSgpgM4wdYXXYV6tCLg/edit?tab=t.0)
 
 - Quick and helpful Mininet debug:  
-  [Mininet Debug Guide](https://installfights.blogspot.com/2016/12/exception-could-not-find-default.html)
+  [Mininet Debug Guide](https://installfights.blogspot.com/2016/12/exception-could-not-find-default.html). Specifcally
+  ```
+  sudo apt-get install openvswitch-testcontroller
+  sudo cp /usr/bin/ovs-testcontroller /usr/bin/ovs-controller
+  ```
+To fix this issue:
+```
+  *** Creating network
+*** Adding controller
+Traceback (most recent call last):
+  File "/mnt/data/johnli/LRAE-VC/mininet_test/video_network.py", line 161, in <module>
+    transmission_test()
+  File "/mnt/data/johnli/LRAE-VC/mininet_test/video_network.py", line 28, in transmission_test
+    net = Mininet(topo=topo, link=TCLink, waitConnected=True)
+  File "/usr/lib/python3/dist-packages/mininet/net.py", line 178, in __init__
+    self.build()
+  File "/usr/lib/python3/dist-packages/mininet/net.py", line 508, in build
+    self.buildFromTopo( self.topo )
+  File "/usr/lib/python3/dist-packages/mininet/net.py", line 475, in buildFromTopo
+    self.addController( 'c%d' % i, cls )
+  File "/usr/lib/python3/dist-packages/mininet/net.py", line 291, in addController
+    controller_new = controller( name, **params )
+  File "/usr/lib/python3/dist-packages/mininet/node.py", line 1593, in DefaultController
+    return controller( name, **kwargs )
+  File "/usr/lib/python3/dist-packages/mininet/node.py", line 1480, in __init__
+    Controller.__init__( self, name, **kwargs )
+  File "/usr/lib/python3/dist-packages/mininet/node.py", line 1417, in __init__
+    self.checkListening()
+  File "/usr/lib/python3/dist-packages/mininet/node.py", line 1433, in checkListening
+    raise Exception( "Please shut down the controller which is"
+Exception: Please shut down the controller which is running on port 6653:
+Active Internet connections (servers and established)
+tcp        0      0 0.0.0.0:6653            0.0.0.0:*               LISTEN      2583705/ovs-control 
+tcp        0      0 127.0.0.1:54128         127.0.0.1:6653          ESTABLISHED 2464204/ovs-vswitch 
+tcp        0      0 127.0.0.1:6653          127.0.0.1:54128         ESTABLISHED 2583705/ovs-control
+```
+Find what processes are running on port 6653 via ```sudo lsof -i :6653```. Then **kill** the process (via PID)
+Then do for cleanup:
+```
+sudo mc -c
+```
 
-- Run the following commands to fix the OpenCV issue:
+- Run the following commands to fix any OpenCV issue:
   ```bash
   sudo apt-get remove --purge python3-opencv
   sudo -H pip3 install opencv-python-headless
   ```
-  This fixes the following issue:
+  which fixes the following issue:
   ```
   Traceback (most recent call last):
     File "/mnt/data/johnli/LRAE-VC/mininet_test/mininet_sender.py", line 2, in <module>
@@ -73,7 +113,6 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 - Make sure to ONLY do `python your_script.py` when you're in the GPU VM via `srun --pty bash`
 - OTHERWISE, do `srun python your_script.py` if you're OUTSIDE of the GPU VM.
 - If you're using PyTorch's DDP: `srun python -m torch.distributed.launch your_script.py`
-- If you want to run the bidirectional models or not, just find this line `model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=True or False)` and set to True/False! No extra work required!
 
 ### Journal: what I learned + conceptual stuff
 ##### What Is Redundancy? It means that the same critical information is stored in more than one place. In the context of an autoencoder’s latent space, redundancy means that even if some of the features (or channels) are lost or dropped, the remaining features still contain enough information to allow the decoder to reconstruct the original input accurately.
