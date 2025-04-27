@@ -21,16 +21,20 @@
   ImportError: /lib/libgdal.so.30: undefined symbol: TIFFGetStrileByteCount, version LIBTIFF_4.0
   ```
 
-#### Training
+### Training
 - To run PNC autoencoder (no classification) `python autoencoder_train.py --model=PNC`
 - To run PNC autoencoder (with classification integrated) `python autoencoder_train.py --model=PNC_with_classification`
 - To run LRAE_VC autoencoder (no classification) `python autoencoder_train.py --model=LRAE_VC`
 - To run conv_lstm_ae (whose current AE baseline is PNC16) with NO dropped out features: `python autoencoder_train_vid_sequence.py --model conv_lstm_ae`
 - To run conv_lstm_ae (whose current AE baseline is PNC16) with up to x/16 zeroed out features dropped out: `python autoencoder_train_vid_sequence.py --model conv_lstm_ae --model_path conv_lstm_ae_final_weights.pth --epochs 25 --drops 12` (e.g. x = 12 here)
-- 
-#### Testing/Inference
-- To run the simple + assumed to be "pretrained" classifier: ``
-#### Sender + Receiver Test & Simulation
+
+### Network Simulation:
+Locally, Just run `./sender.sh` in one terminal and `./receiver.sh` in the other
+
+Mahimahi: Make sure you have a `bandwidth.trace` file 
+
+Mininet:
+
 - **Run receiver first!** via (below is example, change args as necessary)
 ```
 python receiver_decode.py --model_path="PNC_final_w_random_drops.pth" --host=127.0.0.1 --port=8080
