@@ -53,12 +53,11 @@
   sudo -H pip3 install opencv-python-headless
   ```
   which fixes the following issue:
-  ```
-  Traceback (most recent call last):
+  `Traceback (most recent call last):
     File "/mnt/data/johnli/LRAE-VC/mininet_test/mininet_sender.py", line 2, in <module>
       import cv2, torch, numpy as np
   ImportError: /lib/libgdal.so.30: undefined symbol: TIFFGetStrileByteCount, version LIBTIFF_4.0
-  ```
+  `
 
 ### Training
 - To run PNC autoencoder (no classification) `python autoencoder_train.py --model=PNC`
