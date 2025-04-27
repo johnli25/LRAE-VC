@@ -11,9 +11,10 @@
   sudo apt-get install openvswitch-testcontroller
   sudo cp /usr/bin/ovs-testcontroller /usr/bin/ovs-controller
   ```
+  
   To fix this issue:
   ```
-Traceback (most recent call last):
+  Traceback (most recent call last):
   File "/mnt/data/johnli/LRAE-VC/mininet_test/video_network.py", line 161, in <module>
     transmission_test()
   File "/mnt/data/johnli/LRAE-VC/mininet_test/video_network.py", line 28, in transmission_test
