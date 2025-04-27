@@ -32,6 +32,13 @@
 Locally, Just run `./sender.sh` in one terminal and `./receiver.sh` in the other
 
 Mahimahi: Make sure you have a `bandwidth.trace` file 
+```
+mm-delay 20 mm-link bandwidth.trace bandwidth.trace -- bash -lc '
+  ./receiver.sh &
+  sleep 0.2
+  ./sender.sh
+'
+```
 
 Mininet:
 
