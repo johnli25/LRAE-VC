@@ -2,9 +2,9 @@
 python receiver_decode.py \
   --model        pnc32 \
   --model_path   PNC32_final_w_taildrops.pth \
-  --ip      127.0.0.1 \
+  --ip      0.0.0.0 \
   --port    9000 \
-  --deadline_ms 0.7 \
+  --deadline_ms 30 \
   # --lstm_kwargs  '{"total_channels":32,"hidden_channels":32,"ae_model_name":"PNC32","bidirectional":false}' \
   # --quant False
 
