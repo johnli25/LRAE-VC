@@ -11,10 +11,8 @@
   sudo apt-get install openvswitch-testcontroller
   sudo cp /usr/bin/ovs-testcontroller /usr/bin/ovs-controller
   ```
-To fix this issue:
-```
-  *** Creating network
-*** Adding controller
+  To fix this issue:
+  ```
 Traceback (most recent call last):
   File "/mnt/data/johnli/LRAE-VC/mininet_test/video_network.py", line 161, in <module>
     transmission_test()
@@ -36,17 +34,17 @@ Traceback (most recent call last):
     self.checkListening()
   File "/usr/lib/python3/dist-packages/mininet/node.py", line 1433, in checkListening
     raise Exception( "Please shut down the controller which is"
-Exception: Please shut down the controller which is running on port 6653:
-Active Internet connections (servers and established)
-tcp        0      0 0.0.0.0:6653            0.0.0.0:*               LISTEN      2583705/ovs-control 
-tcp        0      0 127.0.0.1:54128         127.0.0.1:6653          ESTABLISHED 2464204/ovs-vswitch 
-tcp        0      0 127.0.0.1:6653          127.0.0.1:54128         ESTABLISHED 2583705/ovs-control
-```
-Find what processes are running on port 6653 via ```sudo lsof -i :6653```. Then **kill** the process (via PID)
-Then do for cleanup:
-```
-sudo mc -c
-```
+  Exception: Please shut down the controller which is running on port 6653:
+  Active Internet connections (servers and established)
+  tcp        0      0 0.0.0.0:6653            0.0.0.0:*               LISTEN      2583705/ovs-control 
+  tcp        0      0 127.0.0.1:54128         127.0.0.1:6653          ESTABLISHED 2464204/ovs-vswitch 
+  tcp        0      0 127.0.0.1:6653          127.0.0.1:54128         ESTABLISHED 2583705/ovs-control
+  ```
+  Find what processes are running on port 6653 via ```sudo lsof -i :6653```. Then **kill** the process (via PID)
+  Then do for cleanup:
+  ```
+  sudo mc -c
+  ```
 
 - Run the following commands to fix any OpenCV issue:
   ```bash
