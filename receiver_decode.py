@@ -103,8 +103,10 @@ def main():
     current_features_received = 0
 
     while True:
+        # print("in while True: Waiting for packet...")
         try:
             pkt, _ = sock.recvfrom(4096)
+            print("Received packet of size:", len(pkt))
             frame_idx, feature_num, data_len = struct.unpack_from("!III", pkt, 0)
             if frame_timestamp is None:
                 frame_timestamp = time.monotonic_ns() / 1e6 # convert to milliseconds

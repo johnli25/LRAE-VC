@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-python receiver_decode.py \
+python -u receiver_decode.py \
   --model        pnc32 \
   --model_path   PNC32_final_w_taildrops.pth \
   --ip      0.0.0.0 \
