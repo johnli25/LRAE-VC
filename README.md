@@ -78,29 +78,7 @@ mm-delay 20 mm-link bandwidth.trace bandwidth.trace -- bash -lc '
 '
 ```
 
-Mininet:
-
-- **Run receiver first!** via (below is example, change args as necessary)
-```
-python receiver_decode.py --model_path="PNC_final_w_random_drops.pth" --host=127.0.0.1 --port=8080
-```
-and wait till it says "Listening on ..."
-- Then run sender (below is example, change args as necessary):
-```
-python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --model_path="PNC_final_w_random_drops.pth" --host=127.0.0.1 --port=8080
-```
-
-### TODOs
-
-- [x] ~~Implement the second and dual neural network for PREDICTING missing features in latent encodings~~
-- [x] ~~Implement and incorporate object classification into the autoencoder NN. How to do this? --> (https://docs.google.com/document/d/1svHaRZ1yiAsARJDC_MInBo5Ln_tRjIg14dhBlCV_UsI/edit?usp=sharing)~~
-- [ ] Create rate-distortion curve
-- [ ] Implement Tambur + FEC/ECC
-- [ ] Implement quantization + entropy coding (if time available)
-- [ ] Implement the modified, regularized loss from here: https://interdigitalinc.github.io/CompressAI/zoo.html (if time available, doubt I"m gonna do this)
-- [ ] 
-### Notes + Other References:
-- Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
+Mininet (TODO):
 
 ### Dev Log + Miscellaneous System CMDs:
 - just do `ssh gpua058` in another terminal to access from another termina
@@ -111,6 +89,22 @@ python sender_encode.py --input_dir="UCF_224x224x3_PNC_FrameCorr_input_imgs/" --
 - Make sure to ONLY do `python your_script.py` when you're in the GPU VM via `srun --pty bash`
 - OTHERWISE, do `srun python your_script.py` if you're OUTSIDE of the GPU VM.
 - If you're using PyTorch's DDP: `srun python -m torch.distributed.launch your_script.py`
+
+### TODOs
+
+- [x] ~~Implement the second and dual neural network for PREDICTING missing features in latent encodings~~
+- [x] ~~Implement and incorporate object classification into the autoencoder NN. How to do this? --> (https://docs.google.com/document/d/1svHaRZ1yiAsARJDC_MInBo5Ln_tRjIg14dhBlCV_UsI/edit?usp=sharing)~~
+- [ ] Create rate-distortion curve
+- [ ] Implement Tambur + FEC/ECC
+- [ ] Implement quantization + entropy coding (if time available)
+- [ ] Implement the modified, regularized loss from here: https://interdigitalinc.github.io/CompressAI/zoo.html (if time available, doubt I"m gonna do this)
+      
+### Notes + Other References:
+- Results sheet: https://docs.google.com/spreadsheets/d/1NVdFgHwTFBAl3Qp2PYW8EZE4UFLQ0xObCSjxnE2KDeo/edit?usp=sharing
+
+
+
+
 
 ### Journal: what I learned + conceptual stuff
 ##### What Is Redundancy? It means that the same critical information is stored in more than one place. In the context of an autoencoder’s latent space, redundancy means that even if some of the features (or channels) are lost or dropped, the remaining features still contain enough information to allow the decoder to reconstruct the original input accurately.
