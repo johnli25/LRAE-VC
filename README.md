@@ -88,7 +88,16 @@ ip -4 -br addr
 In terminal 2:
 do
 ```
-./sender.sh # MAKE SURE IP ADDRESS IS CORRECT (it should be 10.x.x.x following the 'peer')
+sudo nsenter -t <THE_PID> -n -- bash
+
+# 2.2: Verify you’re in the peer namespace
+ip -4 -br addr
+# Expect: ingress 10.0.0.1 peer 10.0.0.2
+
+# 2.3: Give the receiver a moment
+sleep 0.2
+
+./sender.sh # MAKE SURE IP ADDR IN ./sender.sh is CORRECT! (usually it's either 10.0.0.2 or 10.0.0.1)
 ```
 Mininet (TODO):
 
