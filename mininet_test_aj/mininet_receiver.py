@@ -1,6 +1,8 @@
 import argparse, os, socket, struct, zlib
 import cv2, torch, numpy as np
 import torch.nn as nn
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models import PNC32Encoder, PNC32, ConvLSTM_AE
 import json
 import time
@@ -85,6 +87,9 @@ def main():
         shutil.rmtree(output_dir)
     os.makedirs(output_dir, exist_ok=True)
 
+    # Add a frame counter variable
+    saved_frame_count = 0
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 * 2**21)  # 2MB receive buffer
     recv_buf = sock.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
@@ -93,6 +98,8 @@ def main():
     sock.bind((args.ip, args.port))
     sock.settimeout(1.0) # timeout of 1 second
     print(f"[receiver] Listening on {args.ip}:{args.port}")
+
+    deadline_sec = args.deadline_ms / 1000.0 # convert b/c Python's time is in seconds
 
     ##### Version 2: receive each feature separately #####
     features_dict = defaultdict(lambda: [np.zeros((32, 32)) for _ in range(32)])    
@@ -103,10 +110,8 @@ def main():
     current_features_received = 0
 
     while True:
-        # print("in while True: Waiting for packet...")
         try:
             pkt, _ = sock.recvfrom(4096)
-            print("Received packet of size:", len(pkt))
             frame_idx, feature_num, data_len = struct.unpack_from("!III", pkt, 0)
             if frame_timestamp is None:
                 frame_timestamp = time.monotonic_ns() / 1e6 # convert to milliseconds
@@ -155,6 +160,19 @@ def main():
                 cur_frame = frame_idx + 1
                 frame_timestamp = None
                 current_features_received = 0
+
+                # Update and print the frame count
+                saved_frame_count += 1
+                print(f"[receiver:stats] Total frames saved: {saved_frame_count}")
+                # Also count files in directory to verify
+                file_count = len([f for f in os.listdir(output_dir) if f.endswith('.png')])
+                print(f"[receiver:stats] Files in output directory: {file_count}")
+                
+                # If there's a mismatch, list the files
+                if saved_frame_count != file_count:
+                    print(f"[receiver:warning] Mismatch between counted frames ({saved_frame_count}) and files ({file_count})!")
+                    print(f"[receiver:files] {sorted(os.listdir(output_dir))}")
+
 
 
         except socket.timeout:
