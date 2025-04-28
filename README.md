@@ -71,11 +71,20 @@ Locally, Just run `./sender.sh` in one terminal and `./receiver.sh` in the other
 
 Mahimahi: Make sure you have a `bandwidth.trace` file 
 ```
-mm-delay 20 mm-link bandwidth.trace bandwidth.trace -- bash -lc '
-  ./receiver.sh &
-  sleep 0.2
-  ./sender.sh
-'
+# 1.1: Create one veth-pair link and drop into its namespace for Terminal 1: 
+mm-delay 20 mm-link bandwidth.trace bandwidth.trace -- bash
+
+# Prompt now looks like: [delay 20 ms] [link] user@host:$
+
+# 1.2: Note the PID for later nsenter
+echo "EP_A_PID=$$"
+
+# 1.3: Verify your namespace IP (should show ingress 10.0.0.2 peer 10.0.0.1)
+ip -4 -br addr
+
+# 1.4: Start the receiver ./receiver.sh and sender in terminal 2: ./sender.sh.
+
+BUT make sure the ip address in sender.sh is correct! Should be the 10.x.x.x after "peer"
 ```
 
 Mininet (TODO):
