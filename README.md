@@ -67,9 +67,20 @@
 - To run conv_lstm_ae (whose current AE baseline is PNC16) with up to x/16 zeroed out features dropped out: `python autoencoder_train_vid_sequence.py --model conv_lstm_ae --model_path conv_lstm_ae_final_weights.pth --epochs 25 --drops 12` (e.g. x = 12 here)
 
 ### Network Simulation:
-Locally, Just run `./sender.sh` in one terminal and `./receiver.sh` in the other
+For the most simple local setup, Just run `./sender.sh` in one terminal and `./receiver.sh` in the other
 
-Mahimahi: Make sure you have a `bandwidth.trace` file 
+Mahimahi Quick Summary
+- Inside the Mahimahi shell, the sender's IP is assigned as, for example, 10.0.0.2.
+
+- The host machine is reachable at, for example, $MAHIMAHI_BASE = 10.0.0.1.
+
+- Sender programs should connect to $MAHIMAHI_BASE to reach the host (e.g., nc -u $MAHIMAHI_BASE 9000).
+
+- Receiver programs (running on the host) must listen on 0.0.0.0 and allow both tcp/udp (**omg UPDATE YOUR FIREWALL SETTINGS ON HOST smh!!!**) on the port.
+
+- When a sender connects, the receiver will see connections coming from 10.0.0.2
+
+Mahimahi (deprecated): Make sure you have a `bandwidth.trace` file 
 In terminal 1:
 ```
 # 1.1: Create one veth-pair link and drop into its namespace for Terminal 1: 
