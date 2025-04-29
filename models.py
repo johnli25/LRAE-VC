@@ -462,6 +462,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
                     features[:, -drop:, :, :] = 0.0
 
             if quantize > 0:
+                # print("quantize_level in ConvLSTM_AE:", quantize)
                 features = self.quantize(features, levels=quantize)
 
             if self.training or eval_random or eval_consecutive != None: # if eval_real, append drop levels for each sample
