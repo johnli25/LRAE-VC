@@ -92,6 +92,18 @@ def main():
 
     sock.bind((args.ip, args.port))
     sock.settimeout(1.0) # timeout of 1 second
+
+    # Flush any leftover packets in the socket buffer
+    # sock.setblocking(False)
+    # try:
+    #     while True:
+    #         pkt, _ = sock.recvfrom(4096)
+    #         print("Flushed leftover packet")
+    # except BlockingIOError:
+    #     # No more packets left to flush
+    #     print("Probably finished.")
+    # sock.setblocking(True)
+
     print(f"[receiver] Listening on {args.ip}:{args.port}")
 
     ##### Version 2: receive each feature separately #####
@@ -106,7 +118,6 @@ def main():
         # print("in while True: Waiting for packet...")
         try:
             pkt, _ = sock.recvfrom(4096)
-            print("Received packet of size:", len(pkt))
             frame_idx, feature_num, data_len = struct.unpack_from("!III", pkt, 0)
             if frame_timestamp is None:
                 frame_timestamp = time.monotonic_ns() / 1e6 # convert to milliseconds

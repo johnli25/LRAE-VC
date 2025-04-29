@@ -22,8 +22,8 @@ class_map = {
 test_img_names = {
     "Diving-Side_001",
      "Golf-Swing-Front_005", "Kicking-Front_003", 
-    # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
-    # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
+    "Lifting_002", "Riding-Horse_006", "Run-Side_001",
+    "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
 
 # NOTE: uncomment below if you're using UCF101
@@ -320,26 +320,26 @@ if __name__ == "__main__":
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
-    # train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=max_tail_length, quantize=args.quantize) # max_tail_length = None or 10 (in the case of PNC)
+    train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=drops, quantize=args.quantize) # max_tail_length = None or 10 (in the case of PNC)
 
     # NOTE: uncomment below for hardcoded tail_len_drops for more AUTOMATED evaluation. Otherwise, leave commented in!
-    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]
-    mse_list, psnr_list, ssim_list = [], [], []
-    for tail_len_drop in tail_len_drops:
-        print(f"Tail length: {tail_len_drop}")
-        final_test_loss, final_psnr, final_ssim = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drop, quantize=args.quantize)
-        mse_list.append(final_test_loss)
-        psnr_list.append(final_psnr)
-        ssim_list.append(final_ssim)
-        print(f"Final Test Loss: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim:.6f}")
+    # tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]
+    # mse_list, psnr_list, ssim_list = [], [], []
+    # for tail_len_drop in tail_len_drops:
+    #     print(f"Tail length: {tail_len_drop}")
+    #     final_test_loss, final_psnr, final_ssim = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drop, quantize=args.quantize)
+    #     mse_list.append(final_test_loss)
+    #     psnr_list.append(final_psnr)
+    #     ssim_list.append(final_ssim)
+    #     print(f"Final Test Loss: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim:.6f}")
 
-    csv_file = "PNC_results.csv"
+    # csv_file = "PNC_results.csv"
 
-    with open(csv_file, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow(['tail_len_drop', 'MSE', 'PSNR', 'SSIM'])  # header
-        for i in range(len(tail_len_drops)):
-            writer.writerow([tail_len_drops[i], mse_list[i], psnr_list[i], ssim_list[i]])
+    # with open(csv_file, mode='w', newline='') as file:
+    #     writer = csv.writer(file)
+    #     writer.writerow(['tail_len_drop', 'MSE', 'PSNR', 'SSIM'])  # header
+    #     for i in range(len(tail_len_drops)):
+    #         writer.writerow([tail_len_drops[i], mse_list[i], psnr_list[i], ssim_list[i]])
 
     # final_test_loss, final_psnr, final_ssim = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drops, quantize=args.quantize)
     # print(f"Final Test Loss: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim:.6f}")
@@ -354,7 +354,7 @@ if __name__ == "__main__":
     with torch.no_grad():
         for i, (inputs, filenames) in enumerate(test_loader):
             inputs = inputs.to(device)
-            outputs = model(inputs, 28, args.quantize)  # Forward pass through autoencoder
+            outputs = model(inputs, 0, args.quantize)  # Forward pass through autoencoder
 
             # outputs is (batch_size, 3, image_h, image_w)
             print(f"Batch {i+1}/{len(test_loader)}, Output shape: {outputs.shape}")
