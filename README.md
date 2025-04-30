@@ -74,11 +74,15 @@ Mahimahi Quick Summary
 
 - The host machine is reachable at, for example, $MAHIMAHI_BASE = 10.0.0.1.
 
-- Sender programs should connect to $MAHIMAHI_BASE to reach the host (e.g., nc -u $MAHIMAHI_BASE 9000).
+- Sender programs should connect to $MAHIMAHI_BASE to reach the host (e.g., run this on `nc -u $MAHIMAHI_BASE 9000` receiver).
 
 - Receiver programs (running on the host) must listen on 0.0.0.0 and allow both tcp/udp (**omg UPDATE YOUR FIREWALL SETTINGS ON HOST smh!!!**) on the port.
 
 - When a sender connects, the receiver will see connections coming from 10.0.0.2
+
+- Quick test: `ping -c 3 $MAHIMAHI_BASE$`
+
+- Quick test 2: run `nc -u $MAHIMAHI_BASE 9000` on receiver, and `echo "Hello, Receiver!" | nc -u $MAHIMAHI_BASE 9000` on sender
 
 Mahimahi (deprecated): Make sure you have a `bandwidth.trace` file 
 In terminal 1:
