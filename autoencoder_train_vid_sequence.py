@@ -27,7 +27,7 @@ class_map = {
 
 test_img_names = {
     "Diving-Side_001", 
-    "Golf-Swing-Front_005", "Kicking-Front_003", # just use these video(s) for temporary results
+    # "Golf-Swing-Front_005", "Kicking-Front_003", # just use these video(s) for temporary results
     # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
@@ -396,7 +396,7 @@ if __name__ == "__main__":
     drops = args.drops
     batch_size = 32     
     learning_rate = 1e-3
-    seq_len = 5
+    seq_len = 20
     img_height, img_width = 224, 224
     path = "TUCF_sports_action_224x224/"
 
@@ -534,26 +534,26 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # NOTE: uncomment below to train (and save) the model
-    train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, quantize=args.quantize)
-    if drops > 0:
-        torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
-        print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
-    else: # no dropout OR original model
-        torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
-        print(f"Model saved as {args.model}_final_weights.pth")
+    # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, quantize=args.quantize)
+    # if drops > 0:
+    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    # else: # no dropout OR original model
+    #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
+    #     print(f"Model saved as {args.model}_final_weights.pth")
 
     # NOTE: uncomment below to evaluate the model under {0, 10, 20, 30, 40, 50, 60, 70, 80, 90}% drops in one go! 
-    # tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]# NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
-    # mse_list, psnr_list, ssim_list = [], [], []
-    # for drop in tail_len_drops:
-    #     if drop == 0:
-    #         final_test_loss, final_test_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
-    #     else:
-    #         final_test_loss, final_test_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=5) # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
-    #     mse_list.append(final_test_loss)
-    #     psnr_list.append(final_test_psnr)
-    #     ssim_list.append(final_ssim)
-    #     print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
+    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]# NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
+    mse_list, psnr_list, ssim_list = [], [], []
+    for drop in tail_len_drops:
+        if drop == 0:
+            final_test_loss, final_test_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
+        else:
+            final_test_loss, final_test_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=1) # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
+        mse_list.append(final_test_loss)
+        psnr_list.append(final_test_psnr)
+        ssim_list.append(final_ssim)
+        print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
 
     # csv_file = "CASTR_results.csv"
 

@@ -93,17 +93,6 @@ def main():
     sock.bind((args.ip, args.port))
     sock.settimeout(1.0) # timeout of 1 second
 
-    # Flush any leftover packets in the socket buffer
-    # sock.setblocking(False)
-    # try:
-    #     while True:
-    #         pkt, _ = sock.recvfrom(4096)
-    #         print("Flushed leftover packet")
-    # except BlockingIOError:
-    #     # No more packets left to flush
-    #     print("Probably finished.")
-    # sock.setblocking(True)
-
     print(f"[receiver] Listening on {args.ip}:{args.port}")
 
     ##### Version 2: receive each feature separately #####
@@ -159,6 +148,7 @@ def main():
                         recon = net.decoder(lat[:, 0])  # shape: (1, 3, 224, 224)
                     else: 
                         recon = net.decode(z)
+                        
                 end_decode_time = time.monotonic() * 1000
                 print("Time to decode:", end_decode_time - start_decode_time)
 

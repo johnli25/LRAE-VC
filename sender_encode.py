@@ -81,8 +81,8 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
     Encodes and compresses one frame into latent features, optionally quantizes
     then sends with a 4-byte big-endian length prefix.
     """
-    start_time = time.monotonic_ns() / 1e6  
     x = preprocess_frame(frame, device)
+    start_time = time.monotonic_ns() / 1e6  
 
     with torch.no_grad():
         if hasattr(net, "encoder"): 
@@ -119,6 +119,7 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
     # Version 2: send each feature separately
     total_features = arr.shape[1]  # NOTE: arr.shape is (1, 32, 32, 32) for PNC32
 
+    total_bytes = 0
     for i in range(total_features):
         feature = arr[0, i]  # Extract the i-th feature
         compressed_payload = zlib.compress(feature.tobytes())
@@ -126,10 +127,11 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
         packet = struct.pack("!III", frame_idx, i, len(compressed_payload)) + compressed_payload
         sock.sendto(packet, address)
         # time.sleep(0.001) # 1ms delay between packets
+        total_bytes += len(compressed_payload)
+        print(len(compressed_payload), "bytes sent for feature", i)
 
     end_time = time.monotonic_ns() / 1e6
-    print(f"[sender] Encoded and Sent {total_features} features in {end_time - start_time:.6f} ms for frame {frame_idx} of video {video_name}")
-
+    print(f"[sender] Encoded and Sent {total_bytes} bytes in {end_time - start_time:.6f} ms for frame {frame_idx} of video {video_name}")
     # NOTE: return purely for bookkeeping purposes: 
     return {
         "video_name": video_name,

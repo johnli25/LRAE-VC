@@ -8,10 +8,56 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC_Autoencoder, PNC16, PNC32, TestNew, TestNew2, TestNew3, LRAE_VC_Autoencoder
+from models import PNC16, PNC32
 import random
-import time, csv
 from pytorch_msssim import ssim
+from compressai.entropy_models import EntropyBottleneck, GaussianConditional
+from tqdm import tqdm
+from collections import OrderedDict
+
+
+class PNC32WithEntropy(nn.Module):
+    def __init__(self, pretrained=None, freeze_base=True):
+        super().__init__()
+        self.base = PNC32() # original ae
+        if pretrained: 
+            self.base.load_state_dict(torch.load(pretrained), strict=False)
+
+        C = self.base.encoder2.out_channels  # 32
+        # 1×1 convs for hyperprior (no need to modify PNC32)
+        self.hyper_encoder = nn.Conv2d(C, C, kernel_size=1)
+        self.hyper_decoder = nn.Conv2d(C, C, kernel_size=1)
+
+        self.entropy_z = EntropyBottleneck(C)
+        self.gauss_y = GaussianConditional(None)
+
+        if freeze_base:
+            for p in self.base.parameters(): p.requires_grad = False
+
+    def forward(self, x, tail_length=None, quantize_level=0):
+        y   = self.base.encode(x) # y is the original compressed/encoded latent feature 
+        z   = self.hyper_encoder(y) # z captures additional information (e.g., statistics like variance) about 'y' to improve compression.
+        z_q, z_lh = self.entropy_z(z) # z_q is the quantized version of z, and z_lh is the likelihood of z given the model.
+        sigma = self.hyper_decoder(z_q) # sigma is used to model the distribution of 'y' (e.g., as a Gaussian with mean and variance).
+        y_q, y_lh  = self.gauss_y(y, sigma) # y_q is the quantized version of y, and y_lh is the likelihood of y given the model, which will be fed into decoder/reconstructer
+        recon  = self.base.decode(y_q)
+        return recon, y_lh, z_lh 
+    
+    def compress(self, x):
+        y = self.base.encode(x)
+        z = self.hyper_encoder(y)
+        z_bytes = self.entropy_z.compress(z)
+        z_q = self.entropy_z.decompress(z_bytes)
+        sigma = self.hyper_decoder(z_q)
+        y_bytes = self.gauss_y.compress(y, sigma)
+        return {"z": z_bytes, "y": y_bytes}
+
+    def decompress(self, streams):
+        z_q  = self.entropy_z.decompress(streams["z"])
+        sigma = self.hyper_decoder(z_q)
+        y_q  = self.gauss_y.decompress(streams["y"], sigma)
+        return self.base.decode(y_q)
+
 
 # NOTE: uncomment below if you're using UCF Sports Action 
 class_map = {
@@ -21,20 +67,10 @@ class_map = {
 
 test_img_names = {
     "Diving-Side_001",
-     "Golf-Swing-Front_005", "Kicking-Front_003", 
-    "Lifting_002", "Riding-Horse_006", "Run-Side_001",
-    "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
+    # "Golf-Swing-Front_005", "Kicking-Front_003", 
+    # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
+    # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
-
-# NOTE: uncomment below if you're using UCF101
-
-
-def get_labels_from_filename(filenames):
-    labels = []
-    for filename in filenames:
-        activity = "_".join(filename.split("_")[:-2])
-        labels.append(class_map[activity]) # NOTE: class_map is global
-    return labels
 
 
 # Dataset class for loading images and ground truths
@@ -54,13 +90,14 @@ class ImageDataset(Dataset):
         if self.transform:
             image = self.transform(image)
             
-        # Use the same image for both input and ground truth
+        # Use the same image for both input and ground truthx
         return image, self.img_names[idx]  # (image, same_image_as_ground_truth, img filename)
 
 
-def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length, quantize=0):
+def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length, quantize=0, entropy=False):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
+    suffix = "_entropy" if entropy else ""
 
     if max_tail_length: 
         print(f"Training with max tail length: {max_tail_length}")
@@ -100,25 +137,82 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             if max_tail_length: 
-                torch.save(model.state_dict(), f"{model_name}_best_validation_w_taildrops.pth")
-                print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {model_name}_best_validation_w_taildrops.pth")
-            else: 
-                torch.save(model.state_dict(), f"{model_name}_best_validation_no_dropouts.pth")
-                print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {model_name}_best_validation_no_dropouts.pth")
+                # only save w_taildrops if you actually used them
+                fname = f"{model_name}{suffix}_best_validation_w_taildrops.pth"
+                torch.save(model.state_dict(), fname)
+                print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {fname}")
+            else:
+                fname = f"{model_name}{suffix}_best_validation_no_dropouts.pth"
+                torch.save(model.state_dict(), fname)
+                print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {fname}")
 
         print(f"Epoch [{epoch+1}/{num_epochs}], Train Loss: {train_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
     plot_train_val_loss(train_losses, val_losses)
 
     # Save final model
-    if max_tail_length: 
-        torch.save(model.state_dict(), f"{model_name}_final_w_taildrops.pth")
-        print(f"Final model saved as {model_name}_final_w_taildrops.pth")
-    else: torch.save(model.state_dict(), f"{model_name}_final_no_dropouts.pth")
+    if max_tail_length:
+        fname = f"{model_name}{suffix}_final_w_taildrops.pth"
+    else:
+        fname = f"{model_name}{suffix}_final_no_dropouts.pth"
+    torch.save(model.state_dict(), fname)
+    print(f"Final model saved as {fname}")
 
-    # Final Test: test_autoencoder()
+    # Final evaluation/test on test set
     test_loss, _, _ = eval_autoencoder(model, test_loader, criterion, device, max_tail_length, quantize)
     print(f"Final Test Loss: {test_loss:.4f}")
+
+
+def train_entropy_model(
+    model,
+    train_loader,
+    criterion,
+    optimizer,
+    device,
+    img_height,
+    img_width,
+    lambda_rate=0.01,
+    num_epochs=1,
+):
+    """
+    Trains the entropy-augmented model for num_epochs over train_loader.
+    model        : an instance of PNC32WithEntropy
+    train_loader : DataLoader yielding (x, _) batches
+    criterion    : e.g. nn.MSELoss()
+    optimizer    : optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), ...)
+    device       : torch.device
+    img_height   : H (e.g. 224)
+    img_width    : W (e.g. 224)
+    lambda_rate  : trade-off weight for rate term
+    num_epochs   : how many full passes over the data
+    """
+    for epoch in tqdm(range(num_epochs), desc="Training Epochs"):        
+        model.train()
+        total_loss = 0.0
+        for x, _ in train_loader:
+            x = x.to(device)
+
+            optimizer.zero_grad()
+            recon, y_lh, z_lh = model(x)
+
+            # distortion term
+            mse = criterion(recon, x)
+
+            # rate term (bits per pixel)
+            bits_y = (-torch.log2(y_lh + 1e-9)).sum()
+            bits_z = (-torch.log2(z_lh + 1e-9)).sum()
+            bpp = (bits_y + bits_z) / (x.size(0) * img_height * img_width)
+
+            loss = mse + lambda_rate * bpp
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item() * x.size(0)
+
+        avg_loss = total_loss / len(train_loader.dataset)
+        print(f"[Epoch {epoch+1}/{num_epochs}] avg loss: {avg_loss:.4f}")
+
+    return model
 
 
 def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None, quantize=0):
@@ -134,7 +228,10 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None,
             # print("Eval tail length: ", tail_len)
             inputs = inputs.to(device)
 
-            outputs = model(x=inputs, tail_length=max_tail_length, quantize_level=quantize)
+            if not args.entropy: # AKA if PNC32
+                outputs = model(x=inputs, tail_length=max_tail_length, quantize_level=quantize)
+            elif args.entropy: # AKA if PNC32WithEntropy
+                outputs, _, _ = model(x=inputs, tail_length=max_tail_length, quantize_level=quantize)
 
             ##### NOTE: "intermission" function: print estimated byte size of compressed latent features
             # frame_latent = model.module.encode(inputs[0])
@@ -191,6 +288,45 @@ def psnr(mse):
     return 20 * np.log10(1) - 10 * np.log10(mse)
 
 
+def smart_load(
+    model: torch.nn.Module,
+    checkpoint_path: str,
+    device: torch.device,
+    entropy: bool = False,
+    use_dataparallel: bool = False,) -> torch.nn.Module:
+
+    ckpt = torch.load(checkpoint_path, map_location=device)
+
+    # If you saved a dict with 'state_dict' key; else load whole checkpoint
+    state_dict = ckpt.get('state_dict', ckpt)
+
+    # 2. Build new state dict
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        # strip any DataParallel prefix (we can add it later)
+        k_stripped = k.replace('module.', '') 
+        # if we're loading into PNC32WithEntropy and it's a base-AE key, prefix with 'base.'
+        if entropy and not ( # NOTE: for PNC32Entropy, .base needs to be prepended first! 
+            k_stripped.startswith('hyper_encoder') or
+            k_stripped.startswith('hyper_decoder') or
+            k_stripped.startswith('entropy_z') or
+            k_stripped.startswith('gauss_y')
+        ):
+            new_key = 'base.' + k_stripped # 
+        else:
+            new_key = k_stripped
+        new_state_dict[new_key] = v
+
+    # 3. Load into model allowing missing keys for new entropy layers
+    model.load_state_dict(new_state_dict, strict=False)
+
+    # 4. Wrap in DataParallel if desired
+    if use_dataparallel and not isinstance(model, torch.nn.DataParallel):
+        model = torch.nn.DataParallel(model)  # :contentReference[oaicite:1]{index=1}
+
+    return model
+
+
 if __name__ == "__main__":
     def parse_args():
         parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
@@ -200,6 +336,7 @@ if __name__ == "__main__":
         parser.add_argument("--epochs", type=int, default=28, help="Number of epochs to train")
         parser.add_argument("--quantize", type=int, default=0, help="Quantize latent features by how many bits/levels")
         parser.add_argument("--drops", type=int, default=0, help="Maximum tail length for feature random dropout")
+        parser.add_argument("--entropy", action="store_true", help="Use entropy coding")
         return parser.parse_args()
     
     args = parse_args()
@@ -258,69 +395,63 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     if args.model == "PNC":
-        model = PNC_Autoencoder()
+        # model = PNC_Autoencoder()
         max_tail_length = 10 # true PNC
 
     if args.model == "PNC16":
         model = PNC16()
 
     if args.model == "PNC32":
-        model = PNC32()
-
-    if args.model == "TestNew":
-        model = TestNew()
-
-    if args.model == "TestNew2":
-        model = TestNew2()
-
-    if args.model == "TestNew3":
-        model = TestNew3()
+        if args.entropy:
+            model = PNC32WithEntropy(pretrained = args.model_path)
+        else:
+            model = PNC32()
 
     model = model.to(device)
-    if torch.cuda.device_count() > 1:
-        print(f"Using {torch.cuda.device_count()} GPUs")
-        model = nn.DataParallel(model)
 
-    # NOTE: use this function to convert from DataParallel model to normal model. CURRENTLY NOT USED FOR PNC32_final_w_taildrops.pth!!
-    def convertFromDataParallelNormal(checkpoint):
-        new_checkpoint = {}
-        for key, value in checkpoint.items():
-            new_key = key
-            if key.startswith("module."):
-                new_key = key[len("module."):]
-            new_checkpoint[new_key] = value
-        return new_checkpoint
-    
-    # NOTE: use this function to convert from normal model to DataParallel model. CURRENTLY NOT USED FOR PNC32_final_w_taildrops.pth!!
-    def convertFromNormalToDataParallel(checkpoint):
-        new_checkpoint = {}
-        for key, value in checkpoint.items():
-            new_key = key
-            if not key.startswith("module."):
-                new_key = "module." + key
-            new_checkpoint[new_key] = value
-        return new_checkpoint
-
+    use_dataparallel = torch.cuda.device_count() > 1
+    print(f"Using DataParallel: {use_dataparallel} with {torch.cuda.device_count()} GPUs")
     # if args.model_path exists, load and continue training or evaluate from there
     if args.model_path:
-        print(f"Loading model weights from {args.model_path}")
-        checkpoint = torch.load(args.model_path, map_location=device)
-        
-        # NOTE: JUST FOR JOHN'S VM B/C IT USES 2 GPUs: 
-        checkpoint = convertFromNormalToDataParallel(checkpoint)
-        
-        # if any(key.startswith("module.") for key in checkpoint.keys()):
-        #     print("Converting from DataParallel model to normal model")
-        #     checkpoint = convertFromDataParallelNormal(checkpoint)
-        # else:
-        #     print("Converting from normal model to DataParallel model")
-        #     checkpoint = convertFromNormalToDataParallel(checkpoint)
-        
-        model.load_state_dict(checkpoint)
+        model = smart_load(
+        model=model,
+        checkpoint_path=args.model_path,
+        device=device,
+        entropy=args.entropy,
+        use_dataparallel=use_dataparallel,)    
 
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)    
-    train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, args.model, max_tail_length=drops, quantize=args.quantize) # max_tail_length = None or 10 (in the case of PNC)
+
+    # train the model
+    if args.entropy: # and isinstance(model, PNC32WithEntropy):
+        # Stage 1: entropy-only
+        optimizer = optim.Adam(
+            filter(lambda p: p.requires_grad, model.parameters()),
+            lr=1e-4
+        )
+        model = train_entropy_model(
+            model, train_loader, criterion, optimizer,
+            device, img_height, img_width, lambda_rate=0.000001, num_epochs=5
+        )
+        # Stage 2: fine-tune
+        if use_dataparallel:    
+            for p in model.module.base.parameters(): p.requires_grad = True
+        else:
+            for p in model.base.parameters(): p.requires_grad = True
+        model = train_entropy_model(
+            model, train_loader, criterion, optimizer,
+            device, img_height, img_width, lambda_rate=0.000001, num_epochs=20
+        )
+
+    else:
+        # plain PNC training
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        train_autoencoder(
+            model, train_loader, val_loader, test_loader,
+            criterion, optimizer, device, num_epochs,
+            args.model, max_tail_length=drops, quantize=args.quantize
+        )
+
 
     # NOTE: uncomment below for hardcoded tail_len_drops for more AUTOMATED evaluation. Otherwise, leave commented in!
     # tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]
@@ -341,8 +472,8 @@ if __name__ == "__main__":
     #     for i in range(len(tail_len_drops)):
     #         writer.writerow([tail_len_drops[i], mse_list[i], psnr_list[i], ssim_list[i]])
 
-    # final_test_loss, final_psnr, final_ssim = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=tail_len_drops, quantize=args.quantize)
-    # print(f"Final Test Loss: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim:.6f}")
+    final_test_loss, final_psnr, final_ssim = eval_autoencoder(model=model, dataloader=test_loader, criterion=criterion, device=device, max_tail_length=drops, quantize=args.quantize)
+    print(f"Final Test Loss: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim:.6f}")
 
     # Save images generated by DECODER ONLY! 
     output_path = "PNC_test_imgs_post_training/"
@@ -353,8 +484,11 @@ if __name__ == "__main__":
     model.eval()  # Put the autoencoder in eval mode
     with torch.no_grad():
         for i, (inputs, filenames) in enumerate(test_loader):
-            inputs = inputs.to(device)
-            outputs = model(inputs, 0, args.quantize)  # Forward pass through autoencoder
+            inputs = inputs.to(device) 
+            if args.entropy: # PNC32WithEntropy 
+                outputs, y_lh, z_lh = model(inputs, tail_length=19, quantize_level=args.quantize)  # Forward pass through autoencoder
+            else: # PNC32
+                outputs = model(inputs, tail_length=0, quantize_level=args.quantize) # NOTE: tail_length basically means drop tail! ,
 
             # outputs is (batch_size, 3, image_h, image_w)
             print(f"Batch {i+1}/{len(test_loader)}, Output shape: {outputs.shape}")
