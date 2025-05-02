@@ -125,6 +125,7 @@ Mininet (TODO):
 - Make sure to ONLY do `python your_script.py` when you're in the GPU VM via `srun --pty bash`
 - OTHERWISE, do `srun python your_script.py` if you're OUTSIDE of the GPU VM.
 - If you're using PyTorch's DDP: `srun python -m torch.distributed.launch your_script.py`
+- `sudo pkill -9 tmux` fixed weird tmux issues
 
 ### TODOs
 
