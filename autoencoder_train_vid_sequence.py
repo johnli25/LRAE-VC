@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC16, PNC32, ConvLSTM_AE, PNC_Autoencoder, TestNew, TestNew2, TestNew3, LRAE_VC_Autoencoder
+from models import PNC16, PNC32, ConvLSTM_AE
 from tqdm import tqdm
 import random
 import torchvision.utils as vutils
@@ -27,7 +27,8 @@ class_map = {
 
 test_img_names = {
     "Diving-Side_001", 
-    # "Golf-Swing-Front_005", "Kicking-Front_003", # just use these video(s) for temporary results
+    "Golf-Swing-Front_005", 
+    "Kicking-Front_003", # just use these video(s) for temporary results
     # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
@@ -211,7 +212,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
 
 def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, quantize=False):
     ae_model.eval()
-    total_mse, total_psnr, total_ssim, total_frames = 0.0, 0.0, 0.0, 0
+    total_mse, total_ssim, total_frames = 0.0, 0.0, 0
 
     output_dir = "ae_lstm_output_test"
     if os.path.exists(output_dir):
@@ -232,7 +233,6 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
                     pred = outputs[b, t]
                     frame_mse = nn.functional.mse_loss(pred, gt).item()
                     total_mse += frame_mse
-                    total_psnr += psnr(frame_mse)
 
                     # SSIM computation NOTE: add batch + channel dimension)
                     frame_ssim = ssim(
@@ -278,7 +278,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
 
 def evaluate_consecutive(ae_model, dataloader, criterion, device, drop=0, quantize=False, consecutive=0):
     ae_model.eval()
-    total_mse, total_psnr, total_ssim, total_dropped_frames = 0.0, 0.0, 0.0, 0
+    total_mse, total_ssim, total_dropped_frames = 0.0, 0.0, 0
 
     output_dir = "ae_lstm_output_consecutive" 
     if os.path.exists(output_dir):
@@ -543,25 +543,40 @@ if __name__ == "__main__":
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
     # NOTE: uncomment below to evaluate the model under {0, 10, 20, 30, 40, 50, 60, 70, 80, 90}% drops in one go! 
-    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]# NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
-    mse_list, psnr_list, ssim_list = [], [], []
-    for drop in tail_len_drops:
-        if drop == 0:
-            final_test_loss, final_test_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize)
-        else:
-            final_test_loss, final_test_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=1) # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
-        mse_list.append(final_test_loss)
-        psnr_list.append(final_test_psnr)
-        ssim_list.append(final_ssim)
-        print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
+    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]  # NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
+    results = []  # List to store results for CSV
 
-    # csv_file = "CASTR_results.csv"
+    for consecutive in [1, 3, 5]:  # Only evaluate for consecutive=1, 3, and 5
+        print("consecutive: ", consecutive)
+        for drop in tail_len_drops:
+            if drop == 0:
+                final_test_loss, final_test_psnr, final_ssim = evaluate(
+                    model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize
+                )
+            else:
+                final_test_loss, final_test_psnr, final_ssim = evaluate_consecutive(
+                    model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=consecutive
+                )  # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
+            
+            # Append results to the list
+            results.append({
+                "consecutive": consecutive,
+                "tail_len_drop": drop,
+                "mse": final_test_loss,
+                "psnr": final_test_psnr,
+                "ssim": final_ssim
+            })
+            
+            print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
 
-    # with open(csv_file, mode='w', newline='') as file:
-    #     writer = csv.writer(file)
-    #     writer.writerow(['tail_len_drop', 'MSE', 'PSNR', 'SSIM'])  # header
-    #     for i in range(len(tail_len_drops)):
-    #         writer.writerow([tail_len_drops[i], mse_list[i], psnr_list[i], ssim_list[i]])
+    # Save results to a CSV file
+    csv_file = "CASTR_results.csv"
+    with open(csv_file, mode="w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=["consecutive", "tail_len_drop", "mse", "psnr", "ssim"])
+        writer.writeheader()  # Write the header row
+        writer.writerows(results)  # Write all rows from the results list
+
+    print(f"Results saved to {csv_file}")
 
     # start_time = time.time()
     # final_test_loss, final_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops

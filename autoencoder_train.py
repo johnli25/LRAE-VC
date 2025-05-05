@@ -14,6 +14,7 @@ from pytorch_msssim import ssim
 from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from tqdm import tqdm
 from collections import OrderedDict
+import csv
 
 
 class PNC32WithEntropy(nn.Module):
@@ -67,7 +68,8 @@ class_map = {
 
 test_img_names = {
     "Diving-Side_001",
-    # "Golf-Swing-Front_005", "Kicking-Front_003", 
+    "Golf-Swing-Front_005", 
+    "Kicking-Front_003", 
     # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
@@ -97,7 +99,6 @@ class ImageDataset(Dataset):
 def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name, max_tail_length, quantize=0, entropy=False):
     best_val_loss = float('inf')
     train_losses, val_losses = [], []
-    suffix = "_entropy" if entropy else ""
 
     if max_tail_length: 
         print(f"Training with max tail length: {max_tail_length}")
@@ -138,11 +139,11 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
             best_val_loss = val_loss
             if max_tail_length: 
                 # only save w_taildrops if you actually used them
-                fname = f"{model_name}{suffix}_best_validation_w_taildrops.pth"
+                fname = f"{model_name}_best_validation_w_taildrops.pth"
                 torch.save(model.state_dict(), fname)
                 print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {fname}")
             else:
-                fname = f"{model_name}{suffix}_best_validation_no_dropouts.pth"
+                fname = f"{model_name}_best_validation_no_dropouts.pth"
                 torch.save(model.state_dict(), fname)
                 print(f"Epoch [{epoch+1}/{num_epochs}]: Validation loss improved. Model saved as {fname}")
 
@@ -152,9 +153,9 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
 
     # Save final model
     if max_tail_length:
-        fname = f"{model_name}{suffix}_final_w_taildrops.pth"
+        fname = f"{model_name}_final_w_taildrops.pth"
     else:
-        fname = f"{model_name}{suffix}_final_no_dropouts.pth"
+        fname = f"{model_name}_final_no_dropouts.pth"
     torch.save(model.state_dict(), fname)
     print(f"Final model saved as {fname}")
 
@@ -173,6 +174,7 @@ def train_entropy_model(
     img_width,
     lambda_rate=0.01,
     num_epochs=1,
+    model_name="something_with_pth"
 ):
     """
     Trains the entropy-augmented model for num_epochs over train_loader.
@@ -186,6 +188,7 @@ def train_entropy_model(
     lambda_rate  : trade-off weight for rate term
     num_epochs   : how many full passes over the data
     """
+    model_name = model_name.replace(".pth", "")  # Remove .pth if present
     for epoch in tqdm(range(num_epochs), desc="Training Epochs"):        
         model.train()
         total_loss = 0.0
@@ -212,13 +215,14 @@ def train_entropy_model(
         avg_loss = total_loss / len(train_loader.dataset)
         print(f"[Epoch {epoch+1}/{num_epochs}] avg loss: {avg_loss:.4f}")
 
+    # Save the model
+    torch.save(model.state_dict(), f"{model_name}_entropy_final.pth")
     return model
 
 
 def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None, quantize=0):
     model.eval()
     total_mse = 0.0
-    total_psnr = 0.0
     total_ssim = 0.0
     num_samples = 0
     with torch.no_grad():
@@ -262,7 +266,7 @@ def eval_autoencoder(model, dataloader, criterion, device, max_tail_length=None,
 
     assert len(dataloader.dataset) == num_samples, "Mismatch error between dataset size and number of samples processed"
     average_mse = total_mse / num_samples
-    average_psnr = 20 * np.log10(1) - 10 * np.log10(average_mse)
+    average_psnr = - 10 * np.log10(average_mse)
     average_ssim = total_ssim / num_samples
 
     return average_mse, average_psnr, average_ssim
@@ -423,7 +427,7 @@ if __name__ == "__main__":
     criterion = nn.MSELoss()
 
     # train the model
-    if args.entropy: # and isinstance(model, PNC32WithEntropy):
+    if args.entropy: # if trained with Entropy
         # Stage 1: entropy-only
         optimizer = optim.Adam(
             filter(lambda p: p.requires_grad, model.parameters()),
@@ -431,20 +435,24 @@ if __name__ == "__main__":
         )
         model = train_entropy_model(
             model, train_loader, criterion, optimizer,
-            device, img_height, img_width, lambda_rate=0.000001, num_epochs=5
+            device, img_height, img_width, lambda_rate=0.000001, num_epochs=7, model_name=args.model_path
         )
         # Stage 2: fine-tune
         if use_dataparallel:    
-            for p in model.module.base.parameters(): p.requires_grad = True
+            for p in model.module.base.parameters():
+                p.requires_grad = True
         else:
-            for p in model.base.parameters(): p.requires_grad = True
+            for p in model.base.parameters(): 
+                p.requires_grad = True
+        optimizer = optim.Adam(
+            filter(lambda p: p.requires_grad, model.parameters()),
+            lr=1e-4
+        )   
         model = train_entropy_model(
             model, train_loader, criterion, optimizer,
-            device, img_height, img_width, lambda_rate=0.000001, num_epochs=20
+            device, img_height, img_width, lambda_rate=0.000001, num_epochs=40, model_name=args.model_path
         )
-
-    else:
-        # plain PNC training
+    else: # plain PNC training (NO ENTROPY)
         optimizer = optim.Adam(model.parameters(), lr=learning_rate)
         train_autoencoder(
             model, train_loader, val_loader, test_loader,
@@ -486,7 +494,7 @@ if __name__ == "__main__":
         for i, (inputs, filenames) in enumerate(test_loader):
             inputs = inputs.to(device) 
             if args.entropy: # PNC32WithEntropy 
-                outputs, y_lh, z_lh = model(inputs, tail_length=19, quantize_level=args.quantize)  # Forward pass through autoencoder
+                outputs, y_lh, z_lh = model(inputs, tail_length=0, quantize_level=args.quantize)  # Forward pass through autoencoder
             else: # PNC32
                 outputs = model(inputs, tail_length=0, quantize_level=args.quantize) # NOTE: tail_length basically means drop tail! ,
 
