@@ -18,11 +18,9 @@ import csv
 
 
 class PNC32WithEntropy(nn.Module):
-    def __init__(self, pretrained=None, freeze_base=True):
+    def __init__(self, freeze_base=True):
         super().__init__()
         self.base = PNC32() # original ae
-        if pretrained: 
-            self.base.load_state_dict(torch.load(pretrained), strict=False)
 
         C = self.base.encoder2.out_channels  # 32
         # 1×1 convs for hyperprior (no need to modify PNC32)
@@ -216,7 +214,8 @@ def train_entropy_model(
         print(f"[Epoch {epoch+1}/{num_epochs}] avg loss: {avg_loss:.4f}")
 
     # Save the model
-    torch.save(model.state_dict(), f"{model_name}_entropy_final.pth")
+    torch.save(model.state_dict(), f"{model_name}_entropy.pth")
+    print(f"Model saved as {model_name}_entropy.pth")
     return model
 
 
@@ -304,34 +303,29 @@ def smart_load(
     # If you saved a dict with 'state_dict' key; else load whole checkpoint
     state_dict = ckpt.get('state_dict', ckpt)
 
-    # 2. Build new state dict
-    new_state_dict = OrderedDict()
+    # build a clean dict
+    new_state = {}
     for k, v in state_dict.items():
-        # strip any DataParallel prefix (we can add it later)
-        k_stripped = k.replace('module.', '') 
-        # if we're loading into PNC32WithEntropy and it's a base-AE key, prefix with 'base.'
-        if entropy and not ( # NOTE: for PNC32Entropy, .base needs to be prepended first! 
-            k_stripped.startswith('hyper_encoder') or
-            k_stripped.startswith('hyper_decoder') or
-            k_stripped.startswith('entropy_z') or
-            k_stripped.startswith('gauss_y')
-        ):
-            new_key = 'base.' + k_stripped # 
-        else:
-            new_key = k_stripped
-        new_state_dict[new_key] = v
+        k = k.replace("module.", "") # strip DataParallel (if it exists)
+        if entropy and not k.startswith(("hyper_", "entropy_z", "gauss_y")):
+            if not k.startswith("base."): # this is a backbone weight; make sure it has **exactly one** "base."
+                k = "base." + k   # add prefix only once
+        new_state[k] = v
 
-    # 3. Load into model allowing missing keys for new entropy layers
-    model.load_state_dict(new_state_dict, strict=False)
+    missing, unexpected = model.load_state_dict(new_state, strict=False)
 
-    # 4. Wrap in DataParallel if desired
-    if use_dataparallel and not isinstance(model, torch.nn.DataParallel):
-        model = torch.nn.DataParallel(model)  # :contentReference[oaicite:1]{index=1}
+    if use_dataparallel and not isinstance(model, nn.DataParallel):
+        model = nn.DataParallel(model)
 
     return model
 
 
 if __name__ == "__main__":
+    def list_special_keys(path):
+        sd = torch.load(path, map_location='cpu')
+        sd = sd.get('state_dict', sd)          # handle both formats
+        return [k for k in sd if k.startswith(('hyper_', 'entropy_z', 'gauss_y'))]
+
     def parse_args():
         parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
         parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_256U", "PNC16", "PNC32", "TestNew", "TestNew2", "TestNew3", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
@@ -341,6 +335,7 @@ if __name__ == "__main__":
         parser.add_argument("--quantize", type=int, default=0, help="Quantize latent features by how many bits/levels")
         parser.add_argument("--drops", type=int, default=0, help="Maximum tail length for feature random dropout")
         parser.add_argument("--entropy", action="store_true", help="Use entropy coding")
+        parser.add_argument("--training", action="store_true", help="Train the model")
         return parser.parse_args()
     
     args = parse_args()
@@ -407,7 +402,7 @@ if __name__ == "__main__":
 
     if args.model == "PNC32":
         if args.entropy:
-            model = PNC32WithEntropy(pretrained = args.model_path)
+            model = PNC32WithEntropy(freeze_base=True)
         else:
             model = PNC32()
 
@@ -415,50 +410,58 @@ if __name__ == "__main__":
 
     use_dataparallel = torch.cuda.device_count() > 1
     print(f"Using DataParallel: {use_dataparallel} with {torch.cuda.device_count()} GPUs")
-    # if args.model_path exists, load and continue training or evaluate from there
+    # if args.model_path exists, load and continue training or evaluate from there!
     if args.model_path:
         model = smart_load(
         model=model,
         checkpoint_path=args.model_path,
         device=device,
         entropy=args.entropy,
-        use_dataparallel=use_dataparallel,)    
+        use_dataparallel=use_dataparallel,)  
+
+        missing, unexpected = model.load_state_dict(model.state_dict(), strict=False)
+        # NOTE: sanity check (ONLY USE FOR EVAL/INFERENCE, NOT TRAINING)!
+        if args.entropy:
+            has_entropy = any("hyper_encoder" in k for k in model.state_dict())
+            if not has_entropy:
+                raise RuntimeError("The checkpoint has no entropy-layer weights—but --entropy was given!")
 
     criterion = nn.MSELoss()
 
     # train the model
-    if args.entropy: # if trained with Entropy
-        # Stage 1: entropy-only
-        optimizer = optim.Adam(
-            filter(lambda p: p.requires_grad, model.parameters()),
-            lr=1e-4
-        )
-        model = train_entropy_model(
-            model, train_loader, criterion, optimizer,
-            device, img_height, img_width, lambda_rate=0.000001, num_epochs=7, model_name=args.model_path
-        )
-        # Stage 2: fine-tune
-        if use_dataparallel:    
-            for p in model.module.base.parameters():
-                p.requires_grad = True
-        else:
-            for p in model.base.parameters(): 
-                p.requires_grad = True
-        optimizer = optim.Adam(
-            filter(lambda p: p.requires_grad, model.parameters()),
-            lr=1e-4
-        )   
-        model = train_entropy_model(
-            model, train_loader, criterion, optimizer,
-            device, img_height, img_width, lambda_rate=0.000001, num_epochs=40, model_name=args.model_path
-        )
-    else: # plain PNC training (NO ENTROPY)
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        train_autoencoder(
-            model, train_loader, val_loader, test_loader,
-            criterion, optimizer, device, num_epochs,
-            args.model, max_tail_length=drops, quantize=args.quantize
-        )
+    if args.training:
+        if args.entropy: # if trained with Entropy
+            # Stage 1: entropy-only
+            optimizer = optim.Adam(
+                filter(lambda p: p.requires_grad, model.parameters()),
+                lr=1e-4
+            )
+            model = train_entropy_model(
+                model, train_loader, criterion, optimizer,
+                device, img_height, img_width, lambda_rate=0.000001, num_epochs=5, model_name=args.model_path
+            )
+            # Stage 2: fine-tune
+            if use_dataparallel:    
+                for p in model.module.base.parameters():
+                    p.requires_grad = True
+            else:
+                for p in model.base.parameters(): 
+                    p.requires_grad = True
+            optimizer = optim.Adam(
+                filter(lambda p: p.requires_grad, model.parameters()),
+                lr=1e-4
+            )   
+            model = train_entropy_model(
+                model, train_loader, criterion, optimizer,
+                device, img_height, img_width, lambda_rate=0.000001, num_epochs=num_epochs, model_name=args.model_path
+            )
+        else: # plain PNC training (NO ENTROPY)
+            optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+            train_autoencoder(
+                model, train_loader, val_loader, test_loader,
+                criterion, optimizer, device, num_epochs,
+                args.model, max_tail_length=drops, quantize=args.quantize
+            )
 
 
     # NOTE: uncomment below for hardcoded tail_len_drops for more AUTOMATED evaluation. Otherwise, leave commented in!
