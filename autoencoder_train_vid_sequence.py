@@ -97,7 +97,6 @@ class VideoFrameSequenceDataset(Dataset):
                 # Add all start indices to self.start_samples
                 self.start_samples.extend((prefix, idx) for idx in start_indices)
         
-
     def __len__(self):
         return len(self.start_samples)
 
@@ -223,10 +222,7 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
     with torch.no_grad():
         for batch_idx, (frames, prefix_, start_idx_) in enumerate(tqdm(dataloader, desc="Evaluating", unit="batch")):
             frames_tensor = frames.to(device)
-
-            start_time = time.time()
             outputs, _, _ = ae_model(x_seq=frames_tensor, drop=drop, quantize=quantize)
-            end_time = time.time()
             
             for b in range(frames_tensor.size(0)): # for each batch
                 for t in range(frames_tensor.size(1)): # for each frame in video sequence
