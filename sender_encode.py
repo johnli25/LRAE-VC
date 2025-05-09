@@ -128,7 +128,7 @@ def encode_and_send(net, sock, frame, device, quantize, address, video_name, fra
         sock.sendto(packet, address)
         # time.sleep(0.001) # 1ms delay between packets
         total_bytes += len(compressed_payload)
-        print(len(compressed_payload), "bytes sent for feature", i)
+        # print(len(compressed_payload), "bytes sent for feature", i)
 
     end_time = time.monotonic_ns() / 1e6
     print(f"[sender] Encoded and Sent {total_bytes} bytes in {end_time - start_time:.6f} ms for frame {frame_idx} of video {video_name}")

@@ -211,6 +211,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
 
 
 def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, quantize=False):
+    
     ae_model.eval()
     total_mse, total_ssim, total_frames = 0.0, 0.0, 0
 
@@ -516,6 +517,7 @@ if __name__ == "__main__":
         model = ConvLSTM_AE(total_channels=16, hidden_channels=32, ae_model_name="PNC16")
     elif args.model == "conv_lstm_PNC32_ae":
         model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=args.bidirectional)
+        print("model: ConvLSTM_AE with PNC32", model)
 
     # --- Model Initialization ---
     model = model.to(device)
@@ -543,46 +545,46 @@ if __name__ == "__main__":
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
     # NOTE: uncomment below to evaluate the model under {0, 10, 20, 30, 40, 50, 60, 70, 80, 90}% drops in one go! 
-    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]  # NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
-    results = []  # List to store results for CSV
+    # tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]  # NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
+    # results = []  # List to store results for CSV
 
-    for consecutive in [1, 3, 5]:  # Only evaluate for consecutive=1, 3, and 5
-        print("consecutive: ", consecutive)
-        for drop in tail_len_drops:
-            if drop == 0:
-                final_test_loss, final_test_psnr, final_ssim = evaluate(
-                    model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize
-                )
-            else:
-                final_test_loss, final_test_psnr, final_ssim = evaluate_consecutive(
-                    model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=consecutive
-                )  # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
+    # for consecutive in [1, 3, 5]:  # Only evaluate for consecutive=1, 3, and 5
+    #     print("consecutive: ", consecutive)
+    #     for drop in tail_len_drops:
+    #         if drop == 0:
+    #             final_test_loss, final_test_psnr, final_ssim = evaluate(
+    #                 model, test_loader, criterion, device, save_sample=None, drop=drop, quantize=args.quantize
+    #             )
+    #         else:
+    #             final_test_loss, final_test_psnr, final_ssim = evaluate_consecutive(
+    #                 model, test_loader, criterion, device, drop=drop, quantize=args.quantize, consecutive=consecutive
+    #             )  # NOTE: IMPORTANT: Do NOT add 0 drops here!!!
             
-            # Append results to the list
-            results.append({
-                "consecutive": consecutive,
-                "tail_len_drop": drop,
-                "mse": final_test_loss,
-                "psnr": final_test_psnr,
-                "ssim": final_ssim
-            })
+    #         # Append results to the list
+    #         results.append({
+    #             "consecutive": consecutive,
+    #             "tail_len_drop": drop,
+    #             "mse": final_test_loss,
+    #             "psnr": final_test_psnr,
+    #             "ssim": final_ssim
+    #         })
             
-            print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
+    #         print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
 
-    # Save results to a CSV file
-    csv_file = "CASTR_results.csv"
-    with open(csv_file, mode="w", newline="") as file:
-        writer = csv.DictWriter(file, fieldnames=["consecutive", "tail_len_drop", "mse", "psnr", "ssim"])
-        writer.writeheader()  # Write the header row
-        writer.writerows(results)  # Write all rows from the results list
+    # # Save results to a CSV file
+    # csv_file = "CASTR_results.csv"
+    # with open(csv_file, mode="w", newline="") as file:
+    #     writer = csv.DictWriter(file, fieldnames=["consecutive", "tail_len_drop", "mse", "psnr", "ssim"])
+    #     writer.writeheader()  # Write the header row
+    #     writer.writerows(results)  # Write all rows from the results list
 
-    print(f"Results saved to {csv_file}")
+    # print(f"Results saved to {csv_file}")
 
-    # start_time = time.time()
-    # final_test_loss, final_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
-    # end_time = time.time()
-    # print(f"Time taken for evaluation: {end_time - start_time:.2f} seconds")
-    # # final_test_loss, final_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=5) # consecutive drops
-    # # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
-    # print(f"Final Per-Frame Test Loss for test/evaluation MSE: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim} for tail_len_drops = {args.drops}")
-    # print("'Global' Dataset-wide PSNR: ", psnr(final_test_loss))
+    start_time = time.time()
+    final_test_loss, final_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
+    end_time = time.time()
+    print(f"Time taken for evaluation: {end_time - start_time:.2f} seconds")
+    # final_test_loss, final_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=5) # consecutive drops
+    # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
+    print(f"Final Per-Frame Test Loss for test/evaluation MSE: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim} for tail_len_drops = {args.drops}")
+    print("'Global' Dataset-wide PSNR: ", psnr(final_test_loss))

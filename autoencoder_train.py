@@ -15,6 +15,7 @@ from compressai.entropy_models import EntropyBottleneck, GaussianConditional
 from tqdm import tqdm
 from collections import OrderedDict
 import csv
+import zlib
 
 
 class PNC32WithEntropy(nn.Module):
@@ -33,30 +34,50 @@ class PNC32WithEntropy(nn.Module):
         if freeze_base:
             for p in self.base.parameters(): p.requires_grad = False
 
-    def forward(self, x, tail_length=None, quantize_level=0):
+    def forward(self, x, tail_length=None, quantize_level=0): # x is shape (B, 3, H, W)
         y   = self.base.encode(x) # y is the original compressed/encoded latent feature 
-        z   = self.hyper_encoder(y) # z captures additional information (e.g., statistics like variance) about 'y' to improve compression.
-        z_q, z_lh = self.entropy_z(z) # z_q is the quantized version of z, and z_lh is the likelihood of z given the model.
-        sigma = self.hyper_decoder(z_q) # sigma is used to model the distribution of 'y' (e.g., as a Gaussian with mean and variance).
-        y_q, y_lh  = self.gauss_y(y, sigma) # y_q is the quantized version of y, and y_lh is the likelihood of y given the model, which will be fed into decoder/reconstructer
-        recon  = self.base.decode(y_q)
+        if tail_length is not None:
+            batch_size, channels, height, width = y.size()
+            tail_start = channels - tail_length
+            y = y.clone()  # Clone y to avoid modifying the original tensor
+            y[:, tail_start:, :, :] = 0  # Set the tail to zero
+
+        z   = self.hyper_encoder(y) # z = .hyper_encoder(y) captures additional information (e.g., statistics like mean and variance) about 'y' to improve compression.
+        z_q, z_lh = self.entropy_z(z) # .entropy_z(z) quantizes/compresses hyper_encoder's output --> z_q is the quantized version of z, and z_lh is the likelihood of z given the model.
+        sigma = self.hyper_decoder(z_q) # Decodes z_q to produce sigma, representing the scale (standard deviation) parameters for modeling the distribution of y
+        y_q, y_lh  = self.gauss_y(y, sigma) # Quantizes y using sigma to obtain y_q and its likelihood y_lh
+        
+        recon = self.base.decode(y_q) # pass y_q into decoder/reconstructor
         return recon, y_lh, z_lh 
     
     def compress(self, x):
-        y = self.base.encode(x)
-        z = self.hyper_encoder(y)
+        y = self.base.encode(x) # x is shape (B, 3, H, W)
+        z = self.hyper_encoder(y) # Z is shape (B, C, H, W)
+
         z_bytes = self.entropy_z.compress(z)
-        z_q = self.entropy_z.decompress(z_bytes)
-        sigma = self.hyper_decoder(z_q)
-        y_bytes = self.gauss_y.compress(y, sigma)
-        return {"z": z_bytes, "y": y_bytes}
+
+        z_hat = self.entropy_z.decompress(strings=z_bytes, size=z.size()[2:]) # only extract H, W
+        print("z_hat shape: ", z_hat.shape)
+        sigma = self.hyper_decoder(z_hat) # Decodes z_hat to produce sigma, representing the scale (standard deviation) parameters for modeling the distribution of y
+
+        indexes = self.gauss_y.build_indexes(sigma) # Builds the indexes for the GaussianConditional model based on sigma        
+        
+        y_bytes = self.gauss_y.compress(y, indexes) # indexes is needed for .compress()
+
+        return {
+            "z": z_bytes,
+            "y": y_bytes,
+            "shape": z.size()[2:],
+        }
 
     def decompress(self, streams):
-        z_q  = self.entropy_z.decompress(streams["z"])
-        sigma = self.hyper_decoder(z_q)
-        y_q  = self.gauss_y.decompress(streams["y"], sigma)
-        return self.base.decode(y_q)
-
+        z_hat = self.entropy_z.decompress(streams["z"], size=streams["shape"])
+        sigma = self.hyper_decoder(z_hat) # Decodes z_hat to produce sigma, representing the scale (standard deviation) parameters for modeling the distribution of y
+        indexes = self.gauss_y.build_indexes(sigma) # Builds the indexes for the GaussianConditional model based on sigma
+        y_hat = self.gauss_y.decompress(streams["y"], indexes=indexes)
+        recon = self.base.decode(y_hat) # pass y_hat into decoder/reconstructor
+        return recon
+        # return recon.clamp_(0, 1)  # Ensure pixel values are in the range [0, 1]
 
 # NOTE: uncomment below if you're using UCF Sports Action 
 class_map = {
@@ -160,7 +181,7 @@ def train_autoencoder(model, train_loader, val_loader, test_loader, criterion, o
     # Final evaluation/test on test set
     test_loss, _, _ = eval_autoencoder(model, test_loader, criterion, device, max_tail_length, quantize)
     print(f"Final Test Loss: {test_loss:.4f}")
-
+    
 
 def train_entropy_model(
     model,
@@ -321,11 +342,6 @@ def smart_load(
 
 
 if __name__ == "__main__":
-    def list_special_keys(path):
-        sd = torch.load(path, map_location='cpu')
-        sd = sd.get('state_dict', sd)          # handle both formats
-        return [k for k in sd if k.startswith(('hyper_', 'entropy_z', 'gauss_y'))]
-
     def parse_args():
         parser = argparse.ArgumentParser(description="Train the PNC Autoencoder or PNC Autoencoder with Classification.")
         parser.add_argument("--model", type=str, required=True, choices=["PNC", "PNC_256U", "PNC16", "PNC32", "TestNew", "TestNew2", "TestNew3", "PNC_NoTail", "PNC_with_classification", "LRAE_VC"], 
@@ -356,7 +372,7 @@ if __name__ == "__main__":
         transforms.ToTensor(),
     ])
 
-    dataset = ImageDataset(path, transform=transform)
+    dataset = ImageDatasxet(path, transform=transform)
 
     test_indices = [
         i for i in range(len(dataset))
@@ -492,14 +508,47 @@ if __name__ == "__main__":
         print(f"Creating directory: {output_path}")
         os.makedirs(output_path)
 
+    if args.entropy and not args.training: # Evaluation/inference mode with entropy
+        target = model.module if isinstance(model, nn.DataParallel) else model
+        target.entropy_z.update(force=True)
+
+        from compressai.models.base import get_scale_table
+        scale_table = get_scale_table().to(next(target.parameters()).device)                            # default 64 log‑spaced σ’s :contentReference[oaicite:1]{index=1}
+        target.gauss_y.update_scale_table(scale_table, force=True)  # builds its own CDFs
+
     model.eval()  # Put the autoencoder in eval mode
     with torch.no_grad():
         for i, (inputs, filenames) in enumerate(test_loader):
             inputs = inputs.to(device) 
             if args.entropy: # PNC32WithEntropy 
-                outputs, y_lh, z_lh = model(inputs, tail_length=0, quantize_level=args.quantize)  # Forward pass through autoencoder
+                outputs, y_lh, z_lh = model(inputs, tail_length=16, quantize_level=args.quantize)  # Forward pass through autoencoder
             else: # PNC32
-                outputs = model(inputs, tail_length=0, quantize_level=args.quantize) # NOTE: tail_length basically means drop tail! ,
+                outputs = model(inputs, tail_length=20, quantize_level=args.quantize) # NOTE: tail_length basically means drop tail!
+
+            # print/output compression sizes
+            # target = model.module if isinstance(model, nn.DataParallel) else model
+            # if args.entropy:
+            #     bitstreams = target.compress(x=inputs)
+            #     outputs = target.decompress(streams=bitstreams)
+
+            #     batch_bytes = []
+            #     for b in range(len(bitstreams["y"])):
+            #         bytes_z = len(bitstreams["z"][b])
+            #         bytes_y = len(bitstreams["y"][b])
+            #         batch_bytes.append(bytes_z + bytes_y)
+            #         print(f"{filenames[b]} :  z={bytes_z:5d} B , y={bytes_y:5d} B "
+            #             f"-> total={bytes_z+bytes_y:6d} B")
+                    
+            #     print(f"Batch {i+1}/{len(test_loader)} processed.")
+            # else:
+            #     encoding = target.encode(inputs)
+            #     outputs = target.decode(encoding)
+            
+            #     batch_bytes = []
+            #     for b in range(len(inputs)):
+            #         bytes_z = len(zlib.compress(encoding[b].cpu().numpy().tobytes()))  # Corrected line
+            #         batch_bytes.append(bytes_z)
+            #         print(f"{filenames[b]} :  z={bytes_z:5d} B")
 
             # outputs is (batch_size, 3, image_h, image_w)
             print(f"Batch {i+1}/{len(test_loader)}, Output shape: {outputs.shape}")

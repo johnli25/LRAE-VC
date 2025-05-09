@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 python sender_encode.py \
-  --model        pnc32 \
-  --model_path   PNC32_final_w_taildrops_quantize256_8bits.pth \
+  --model        conv_lstm_PNC32_ae \
+  --model_path   conv_lstm_PNC32_ae_dropUpTo_32_quantize256_8_bits.pth \
   --input        ./TUCF_sports_action_224x224_mp4_vids \
   --ip      10.0.0.1 \
   --port    9000 \
   --quant \
-  # --lstm_kwargs  '{"total_channels":32,"hidden_channels":32,"ae_model_name":"PNC32","bidirectional":false}' \
+  --lstm_kwargs  '{"total_channels":32,"hidden_channels":32,"ae_model_name":"PNC32","bidirectional":false}' \
 
 
 ##### copy from below for ease of access: ##### 
