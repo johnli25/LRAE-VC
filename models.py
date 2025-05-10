@@ -451,6 +451,3 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         x_clamped = torch.clamp(x, 0, 1)
         x_quantized = torch.round(x_clamped * (levels - 1)) / (levels - 1)
         return x_quantized
-
-
-    

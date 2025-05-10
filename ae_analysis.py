@@ -25,8 +25,8 @@ class_map = {
 }
 
 test_img_names = {
-    "Diving-Side_001", 
-    # "Golf-Swing-Front_005", 
+    # "Diving-Side_001", 
+    "Golf-Swing-Front_005", 
     # "Kicking-Front_003", # just use these video(s) for temporary results
     # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
     # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
@@ -232,7 +232,48 @@ def main_ae_lstm(model_path, dataloader, criterion, drop=0, quantize=False, bidi
     #             output_np = pred.detach().permute(1, 2, 0).cpu().numpy()            
     #             plt.imsave(os.path.join(output_path, f"{prefix_[b]}_{start_idx_}_{t}.png"), output_np)
     
+    with torch.no_grad():
+        frames_batch, prefixes, start_idxs = next(iter(dataloader))
+        # assume batch_size=1 --> take the first (and only) sequence
+        seq_tensor = frames_batch[0].to(device)  # shape (T,3,H,W)
+        encode_and_visualize(model, seq_tensor, output_dir="feature_diffs")
+    
     return avg_mse
+
+def encode_and_visualize(model, frames_tensor, output_dir="feature_diffs"):
+    """
+    1) Encodes each frame in frames_tensor via model.encode().
+    2) Saves per-channel, consecutive-frame difference maps in output_dir.
+    frames_tensor shape: (T, 3, H, W).
+    """
+    device = frames_tensor.device
+    print(f"frames_tensor shape: {frames_tensor.shape}")
+    print("device: ", device)   
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Encode each frame (T, 3, H, W) -> (T, C, Hf, Wf)
+    with torch.no_grad():
+        encodings = []
+        for t in range(frames_tensor.size(0)):
+            encoding = model.encoder(frames_tensor[t].to(device))  # shape (C, Hf, Wf)
+            encodings.append(encoding.squeeze(0))
+        encoded_batch = torch.stack(encodings, dim=0)  
+
+    T, C, Hf, Wf = encoded_batch.shape
+
+    # Visualize differences for each feature channel
+    for c in range(C):
+        channel_dir = os.path.join(output_dir, f"feature_{c}")
+        os.makedirs(channel_dir, exist_ok=True)
+        print("channel_dir: ", channel_dir) 
+        for t in range(T - 1):
+            diff = torch.abs(encoded_batch[t, c] - encoded_batch[t+1, c]).cpu().detach().numpy()
+            plt.imshow(diff, cmap="hot")
+            plt.colorbar()
+            plt.title(f"Ch {c}: Frame {t} vs {t+1}", pad=20)
+            plt.savefig(os.path.join(channel_dir, f"frame_{t}_diff.png"))
+            plt.close()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PNC")
@@ -244,7 +285,7 @@ if __name__ == "__main__":
 
     img_height, img_width = 224, 224
     path = "TUCF_sports_action_224x224/"
-    batch_size = 8
+    batch_size = 1
     seq_len = 20
     transform = transforms.Compose([
         transforms.Resize((img_height, img_width)), # NOTE: not needed if dataset already resized (e.g. to 224x224)
