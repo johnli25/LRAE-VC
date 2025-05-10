@@ -1,8 +1,3 @@
-Thanks for the detail. I’ll analyze why pickling + zlib compressing 32 float16 blocks of 32,768 elements each causes a \~300kB payload—when sending just one block gives \~10kB.
-
-I'll dig into the overhead of pickling and compressing many small float16 PyTorch tensors, compared to batching and compressing them as a single array. I’ll get back to you shortly with a breakdown and recommendations.
-
-
 # Why Small Blocks Inflate Compressed Size
 
 When a 32,768-element `torch.float16` tensor is split into 32 blocks of 1,024 elements and each block is pickled and compressed individually, the total compressed size (\~300 KB) becomes far larger than compressing the tensor as one block (\~10 KB). This happens due to a combination of pickle overhead on each small object and reduced compression efficiency on many small chunks. Below, we detail the reasons and compare the outcomes, then discuss how to avoid this problem.
