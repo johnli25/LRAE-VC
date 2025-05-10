@@ -541,7 +541,7 @@ if __name__ == "__main__":
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
     # NOTE: uncomment below to evaluate the model under {0, 10, 20, 30, 40, 50, 60, 70, 80, 90}% drops in one go! 
-    tail_len_drops = [30] # [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]  # NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
+    tail_len_drops = [21] # [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]  # NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
     results = []  # List to store results for CSV
 
     for consecutive in [1, 3, 5]:  # Only evaluate for consecutive=1, 3, and 5
