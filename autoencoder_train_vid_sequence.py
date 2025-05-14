@@ -209,8 +209,10 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
     print(f"Test Loss: {test_loss:.4f}, Test PSNR: {test_psnr:.4f}, Test SSIM: {test_ssim:.4f}")
 
 
+def train_with_entropy(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0):
+
+
 def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, quantize=False):
-    
     ae_model.eval()
     total_mse, total_ssim, total_frames = 0.0, 0.0, 0
 
