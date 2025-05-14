@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 import random 
 import math 
+from compressai.entropy_models import EntropyBottleneck
 
 class PNC16(nn.Module):
     def __init__(self):
@@ -325,6 +326,8 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         self.hidden_channels = hidden_channels
         self.bidirectional = bidirectional
 
+        # self.entropy_bottleneck = EntropyBottleneck(total_channels) # NOTE: this is not used in the current implementation, but can be used for entropy coding of the latent space
+
         # 1) encoder
         if ae_model_name == "PNC16":
             print("Using PNC16 Encoder")
@@ -369,6 +372,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
         for t in range(seq_len): # So outer loop needs to loop thru each time step (of frames) in the sequence
             frame = x_seq[:, t] # needs to be of shape (batch, 3, 224, 224), so that...
             features = self.encoder(frame) # .encoder(frame) returns (batch, feature_maps, height, width)!
+            features_hat, likelihood = self.entropy_bottleneck(features) 
             current_drop = []
         
             # 2) Randomly drop tail channels/features
@@ -443,11 +447,7 @@ class ConvLSTM_AE(nn.Module): # NOTE: this does "automatic/default" 0 padding fo
             return recon, imputed_latents, None
         
     def quantize(self, x, levels=256):  
-        """
-        Simulate quantization by clamping x to [0,1] and then rounding to levels-1 steps.
-        For optimal reconstruction quality, you should consider using quantization-aware training.
-        """
-        # For simplicity, assume x is roughly in [0, 1]. Otherwise, consider a learned scale.
+        # For simplicity, assume x is roughly in [0, 1].
         x_clamped = torch.clamp(x, 0, 1)
         x_quantized = torch.round(x_clamped * (levels - 1)) / (levels - 1)
         return x_quantized

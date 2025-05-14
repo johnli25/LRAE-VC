@@ -86,11 +86,11 @@ class_map = {
 }
 
 test_img_names = {
-    # "Diving-Side_001",
+    "Diving-Side_001",
     "Golf-Swing-Front_005", 
-    # "Kicking-Front_003", 
-    # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
-    # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
+    "Kicking-Front_003", 
+    "Lifting_002", "Riding-Horse_006", "Run-Side_001",
+    "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
 
 
@@ -372,7 +372,7 @@ if __name__ == "__main__":
         transforms.ToTensor(),
     ])
 
-    dataset = ImageDatasxet(path, transform=transform)
+    dataset = ImageDataset(path, transform=transform)
 
     test_indices = [
         i for i in range(len(dataset))
@@ -481,7 +481,7 @@ if __name__ == "__main__":
 
 
     # NOTE: uncomment below for hardcoded tail_len_drops for more AUTOMATED evaluation. Otherwise, leave commented in!
-    tail_len_drops = [30]
+    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]
     mse_list, psnr_list, ssim_list = [], [], []
     for tail_len_drop in tail_len_drops:
         print(f"Tail length: {tail_len_drop}")

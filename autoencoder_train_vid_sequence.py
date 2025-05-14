@@ -8,7 +8,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import argparse
-from models import PNC16, PNC32, ConvLSTM_AE
+from models import ConvLSTM_AE
 from tqdm import tqdm
 import random
 import torchvision.utils as vutils
@@ -26,11 +26,11 @@ class_map = {
 }
 
 test_img_names = {
-    # "Diving-Side_001", 
+    "Diving-Side_001", 
     "Golf-Swing-Front_005", 
-    # "Kicking-Front_003", # just use these video(s) for temporary results
-    # "Lifting_002", "Riding-Horse_006", "Run-Side_001",
-    # "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
+    "Kicking-Front_003", # just use these video(s) for temporary results
+    "Lifting_002", "Riding-Horse_006", "Run-Side_001",
+    "SkateBoarding-Front_003", "Swing-Bench_016", "Swing-SideAngle_006", "Walk-Front_021"
 }
 
 class VideoFrameSequenceDataset(Dataset):
@@ -242,23 +242,6 @@ def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, 
 
                     total_frames += 1
 
-                    ##### NOTE: "intermission" function: print approx byte size of compressed latent features. THIS DOES NOT ACTUALLY AFFECT TRAINING/EVAL NOR COMPRESS THE LATENT FEATURES via quantization. 
-                    # frame_latent = ae_model.module.encoder(gt.unsqueeze(0)) if hasattr(ae_model, "module") else ae_model.encode(gt.unsqueeze(0))
-                    # if quantize > 0:
-                    #     features_cpu = frame_latent.squeeze(0).detach().cpu().numpy()
-                    #     features_uint8 = (features_cpu * 7).astype(np.uint8)  # Convert to uint8
-                    #     compressed = zlib.compress(features_uint8.tobytes())
-                    #     latent_num_bytes = len(compressed)
-                    #     print(f"[Simulated Compression] Frame {b}_{t} compressed size (quantized to uint8): {latent_num_bytes} bytes "
-                    #         f"(Original shape: {tuple(frame_latent.shape)})")
-                    # else:
-                    #     features_cpu = frame_latent.squeeze(0).detach().cpu().numpy().astype(np.float32)
-                    #     compressed = zlib.compress(features_cpu.tobytes())
-                    #     latent_num_bytes = len(compressed)
-                    #     print(f"[Simulated Compression] Frame {b}_{t} compressed size (float32): {latent_num_bytes} bytes "
-                    #         f"(Original shape: {tuple(frame_latent.shape)})")
-                    ##### end intermission function
-
                     if save_sample:
                         save_dir = output_dir
                         file_name = f"{prefix_[b]}_{start_idx_[b]}_{t}.png"
@@ -391,7 +374,7 @@ if __name__ == "__main__":
     # Hyperparameters
     num_epochs = args.epochs
     drops = args.drops
-    batch_size = 32     
+    batch_size = 8     
     learning_rate = 1e-3
     seq_len = 20
     img_height, img_width = 224, 224
@@ -507,13 +490,10 @@ if __name__ == "__main__":
         return model
 
     # Example: pick your autoencoder model
-    if args.model == "PNC16":
-        model = PNC16()
-    elif args.model == "conv_lstm_PNC16_ae":
+    if args.model == "conv_lstm_PNC16_ae":
         model = ConvLSTM_AE(total_channels=16, hidden_channels=32, ae_model_name="PNC16")
     elif args.model == "conv_lstm_PNC32_ae":
         model = ConvLSTM_AE(total_channels=32, hidden_channels=32, ae_model_name="PNC32", bidirectional=args.bidirectional)
-        print("model: ConvLSTM_AE with PNC32", model)
 
     # --- Model Initialization ---
     model = model.to(device)
@@ -534,14 +514,14 @@ if __name__ == "__main__":
     # NOTE: uncomment below to train (and save) the model
     # train(model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=args.model, max_drops=drops, quantize=args.quantize)
     # if drops > 0:
-    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_features_final_weights.pth")
-    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_features_final_weights.pth")
+    #     torch.save(model.state_dict(), f"{args.model}_dropUpTo_{drops}_final_weights.pth")
+    #     print(f"Model saved as {args.model}_dropUpTo_{drops}_final_weights.pth")
     # else: # no dropout OR original model
     #     torch.save(model.state_dict(), f"{args.model}_final_weights.pth")
     #     print(f"Model saved as {args.model}_final_weights.pth")
 
     # NOTE: uncomment below to evaluate the model under {0, 10, 20, 30, 40, 50, 60, 70, 80, 90}% drops in one go! 
-    tail_len_drops = [21] # [0, 3, 6, 10, 13, 16, 19, 22, 26, 28]  # NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
+    tail_len_drops = [0, 3, 6, 10, 13, 16, 19, 22, 26, 28] # NOTE: For consecutive tail_len drops, DO NOT add 0 drops here!!!
     results = []  # List to store results for CSV
 
     for consecutive in [1, 3, 5]:  # Only evaluate for consecutive=1, 3, and 5
@@ -567,17 +547,16 @@ if __name__ == "__main__":
             
             print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
 
-    # # Save results to a CSV file
-    # csv_file = "CASTR_results.csv"
-    # with open(csv_file, mode="w", newline="") as file:
-    #     writer = csv.DictWriter(file, fieldnames=["consecutive", "tail_len_drop", "mse", "psnr", "ssim"])
-    #     writer.writeheader()  # Write the header row
-    #     writer.writerows(results)  # Write all rows from the results list
+    # Save results to a CSV file
+    csv_file = "CASTR_results.csv"
+    with open(csv_file, mode="w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=["consecutive", "tail_len_drop", "mse", "psnr", "ssim"])
+        writer.writeheader()  # Write the header row
+        writer.writerows(results)  # Write all rows from the results list
 
-    # print(f"Results saved to {csv_file}")
+    print(f"Results saved to {csv_file}")
 
-    final_test_loss, final_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
-    # final_test_loss, final_psnr, final_ssim = evaluate_consecutive(model, test_loader, criterion, device, drop=args.drops, quantize=args.quantize, consecutive=5) # consecutive drops
+    # final_test_loss, final_psnr, final_ssim = evaluate(model, test_loader, criterion, device, save_sample="test", drop=args.drops, quantize=args.quantize) # constant number of drops
     # final_test_loss = evaluate_realistic(model, test_loader, criterion, device, input_drop=args.drops) # random number of drops
-    print(f"Final Per-Frame Test Loss for test/evaluation MSE: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim} for tail_len_drops = {args.drops}")
-    print("'Global' Dataset-wide PSNR: ", psnr(final_test_loss))
+    # print(f"Final Per-Frame Test Loss for test/evaluation MSE: {final_test_loss:.6f} and PSNR: {final_psnr:.6f} and SSIM: {final_ssim} for tail_len_drops = {args.drops}")
+    # print("'Global' Dataset-wide PSNR: ", psnr(final_test_loss))
