@@ -209,7 +209,7 @@ def train(ae_model, train_loader, val_loader, test_loader, criterion, optimizer,
     print(f"Test Loss: {test_loss:.4f}, Test PSNR: {test_psnr:.4f}, Test SSIM: {test_ssim:.4f}")
 
 
-def train_with_entropy(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0):
+# def train_with_entropy(ae_model, train_loader, val_loader, test_loader, criterion, optimizer, device, num_epochs, model_name=None, max_drops=0):
 
 
 def evaluate(ae_model, dataloader, criterion, device, save_sample=None, drop=0, quantize=False):
@@ -550,7 +550,7 @@ if __name__ == "__main__":
             print(f"Final Test Loss For evaluation: {final_test_loss:.6f} and PSNR: {final_test_psnr:.6f} and SSIM:{final_ssim} for tail_len_drops = {drop}")
 
     # Save results to a CSV file
-    csv_file = "CASTR_results.csv"
+    csv_file = "CASTR_results_no_quantize.csv"
     with open(csv_file, mode="w", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=["consecutive", "tail_len_drop", "mse", "psnr", "ssim"])
         writer.writeheader()  # Write the header row
